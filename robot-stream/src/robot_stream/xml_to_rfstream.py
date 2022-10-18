@@ -266,7 +266,9 @@ def convert_xml_to_rfstream(source, write: Optional[Callable[[str], None]] = Non
     def create_listener(robot_attrs):
         initial_date_str = robot_attrs["generated"]
         initial_time = parse_time(initial_date_str)
-        listener = RFStream(__write__=write, __initial_time__=initial_time)
+        listener = RFStream(
+            __write__=write, __initial_time__=initial_time, robot_version="<not loaded>"
+        )
         return listener
 
     xml.sax.parse(source, _XmlSaxParser(create_listener))

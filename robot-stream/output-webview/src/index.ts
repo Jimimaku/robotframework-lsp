@@ -1,5 +1,6 @@
 import { Decoder, IMessage, iter_decoded_log_format } from "./decoder";
 import "./style.css";
+import { requestToHandler, sendEventToClient, nextMessageSeq, IEventMessage} from "./vscodeComm";
 
 // Interesting reads:
 // https://medium.com/metaphorical-web/javascript-treeview-controls-devil-in-the-details-74c252e00ed8
@@ -96,7 +97,7 @@ export function updateFilterLevel(filterLevel: "FAIL" | "WARN" | "PASS") {
     }
 }
 
-export function main(opts: IOpts) {
+function main(opts: IOpts) {
     lastOpts = opts;
     const mainDiv: HTMLElement = document.getElementById("mainTree");
     mainDiv.replaceChildren(); // clear all children
@@ -171,5 +172,34 @@ export function main(opts: IOpts) {
     return main;
 }
 
-window["main"] = main;
-window["updateFilterLevel"] = updateFilterLevel;
+function onClickReference(message) {
+    let ev: IEventMessage = {
+        type: "event",
+        seq: nextMessageSeq(),
+        event: "onClickReference",
+    };
+    ev["data"] = message;
+    sendEventToClient(ev);
+}
+
+let lastContents = undefined;
+
+requestToHandler["setContents"] = function setContents(msg) {
+    lastContents = msg.outputFileContents;
+    main({
+        outputFileContents: msg.outputFileContents,
+        filterLevel: "PASS",
+        viewMode: "flat",
+        onClickReference: onClickReference,
+    });
+};
+
+function onChangedFilterLevel() {
+    const filterLevel = document.getElementById("filterLevel");
+    const value: "FAIL" | "WARN" | "PASS" = <"FAIL" | "WARN" | "PASS">(<HTMLSelectElement>filterLevel).value;
+    updateFilterLevel(value);
+}
+
+function onChangedRun() {}
+window["onChangedRun"] = onChangedRun;
+window["onChangedFilterLevel"] = onChangedFilterLevel;

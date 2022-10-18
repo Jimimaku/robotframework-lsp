@@ -25,6 +25,7 @@ class _RobotOutputImpl:
         port: int,
         write: Optional[Callable[[str], None]] = None,
         initial_time: Optional[datetime.datetime] = None,
+        robot_version: Optional[str] = None,
     ):
         self._written_initial = False
 
@@ -56,6 +57,7 @@ class _RobotOutputImpl:
 
         self._rotate_output()
         self._id_generator = _gen_id()
+        self._robot_version = robot_version
 
     @property
     def current_file(self):
@@ -88,9 +90,13 @@ class _RobotOutputImpl:
             self._write_json("I ", f"sys.platform={sys.platform}")
             self._write_json("I ", f"python={sys.version}")
 
-            import robot
+            robot_version = self._robot_version
+            if robot_version is None:
+                import robot
 
-            self._write_json("I ", f"robot={robot.get_version()}")
+                robot_version = robot.get_version()
+
+            self._write_json("I ", f"robot={robot_version}")
             self._write_with_separator(
                 "T ", (self._initial_time.isoformat(timespec="milliseconds"),)
             )

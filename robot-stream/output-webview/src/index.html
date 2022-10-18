@@ -9,14 +9,14 @@
     <body class="vscode-dark" style="padding: 0 0 0 0">
         <div style="display: flex">
             <div class="summaryField" style="flex-grow: 1">
-                <select name="selectedRun" id="selectedRun" onchange="window.onChangedRun()" style="width: 100%;">
+                <select name="selectedRun" id="selectedRun" onchange="window.onChangedRun()" style="width: 100%">
                     <option value="NO_RUN" selected="selected">Select run...</option>
                 </select>
             </div>
             <div class="summaryField" id="summary">Runs:&nbsp;&nbsp;&nbsp;&nbsp;Failures:&nbsp;&nbsp;&nbsp;&nbsp;</div>
             <div class="summaryField NOT_RUN" style="flex-grow: 1" id="resultBar"></div>
             <div class="summaryField">
-                Filter: 
+                Filter:
                 <select name="filterLevel" id="filterLevel" onchange="window.onChangedFilterLevel()">
                     <option value="FAIL">FAIL</option>
                     <option value="WARN">WARN</option>
@@ -27,154 +27,8 @@
 
         <div id="mainTree"></div>
     </body>
-    <script type="text/javascript">
-        let lastContents = undefined;
-
-        window.onChangedFilterLevel = function () {
-            const filterLevel = document.getElementById("filterLevel");
-            window.updateFilterLevel(filterLevel.value);
-        };
-
-        function getOutputFileContents() {
-            return getDummyOutputFileContents();
-        }
-
-        const onClickReference = console.log;
-
-        function setContents(outputFileContents) {
-            lastContents = outputFileContents;
-            window.main({
-                outputFileContents: outputFileContents,
-                filterLevel: "PASS",
-                viewMode: "flat",
-                onClickReference: onClickReference,
-            });
-        }
-
-        window.addEventListener("message", (event) => {
-            const message = event.data;
-
-            switch (message.command) {
-                case "setContents":
-                    setContents(message.outputFileContents);
-                    break;
-            }
-        });
-
-        function getDummyOutputFileContents() {
-            // Note: chars to escape:
-            // \, &, <, >, ", ', `
-            return `
-V 1
-I "sys.platform=win32"
-I "python=3.9.6 (default, Jul 30 2021, 11:42:22) [MSC v.1916 64 bit (AMD64)]"
-I "robot=4.1.3"
-T 2022-10-10T15:15:47.480
-M a:"Robot1"
-M b:"s1"
-M c:"C:\\\\Users\\\\fabio\\\\AppData\\\\Local\\\\Temp\\\\pytest-of-fabio\\\\pytest-303\\\\test_robot_stream0\\\\test_robot_stream\\\\robot1.robot"
-SS a|b|c|0.035
-M d:"First task"
-M e:"s1-t1"
-ST d|e|11|0.036
-M f:"First keyword"
-M g:""
-M h:"KEYWORD"
-SK f|g|h|g|0.036
-M i:"No Operation"
-M j:"BuiltIn"
-M k:"Does absolutely nothing."
-SK i|j|h|k|0.037
-M l:"PASS"
-EK l|0.037
-EK l|0.037
-M m:"Log"
-M n:"Logs the given message with the given level."
-SK m|j|h|n|0.037
-M o:"Some &lt;data &amp;encode &lt;/script&gt"
-KA o
-EK l|0.038
-ET l|g|0.038
-M p:"Second task"
-M q:"s1-t2"
-ST p|q|15|0.038
-SK f|g|h|g|0.039
-SK i|j|h|k|0.039
-EK l|0.039
-EK l|0.039
-M r:"\${counter} IN RANGE [ 0 | 5 ]"
-M s:"FOR"
-SK r|g|s|g|0.039
-M t:"\${counter} = 0"
-M u:"FOR ITERATION"
-SK t|g|u|g|0.04
-M v:"\${counter} == 4"
-M w:"IF"
-SK v|g|w|g|0.04
-M x:"Fail"
-M y:"Fails the test with the given message and optionally alters its tags."
-SK x|j|h|y|0.04
-M z:"Failed execution for some reason..."
-KA z
-M A:"NOT RUN"
-EK A|0.04
-EK A|0.04
-SK m|j|h|n|0.04
-M B:"\${counter}"
-KA B
-EK l|0.041
-EK l|0.041
-M C:"\${counter} = 1"
-SK C|g|u|g|0.041
-SK v|g|w|g|0.041
-SK x|j|h|y|0.041
-KA z
-EK A|0.042
-EK A|0.042
-SK m|j|h|n|0.042
-KA B
-EK l|0.042
-EK l|0.042
-M D:"\${counter} = 2"
-SK D|g|u|g|0.042
-SK v|g|w|g|0.043
-SK x|j|h|y|0.043
-KA z
-EK A|0.043
-EK A|0.043
-SK m|j|h|n|0.043
-KA B
-EK l|0.043
-EK l|0.043
-M E:"\${counter} = 3"
-SK E|g|u|g|0.043
-SK v|g|w|g|0.044
-SK x|j|h|y|0.044
-KA z
-EK A|0.044
-EK A|0.044
-SK m|j|h|n|0.044
-KA B
-EK l|0.044
-EK l|0.044
-M F:"\${counter} = 4"
-SK F|g|u|g|0.044
-SK v|g|w|g|0.045
-SK x|j|h|y|0.045
-KA z
-M G:"FAIL"
-EK G|0.045
-EK G|0.046
-SK m|j|h|n|0.046
-KA B
-EK A|0.046
-EK G|0.046
-EK G|0.046
-ET G|z|0.047
-ES G|0.047
-`;
-        }
-
-        setContents(getOutputFileContents());
+    <script>
+        const vscode = acquireVsCodeApi();
+        window.setVSCodeAPI(vscode);
     </script>
 </html>

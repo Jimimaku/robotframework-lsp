@@ -20,17 +20,17 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
 
     // We can use this as a place to store the run results we've seen.
     private storageUri: vscode.Uri = undefined;
+    private subscriptions: { dispose(): any }[];
 
     constructor(context: vscode.ExtensionContext) {
         this.extensionUri = context.extensionUri;
         this.storageUri = context.storageUri;
-        context.subscriptions.push(
+        this.subscriptions = [];
+        this.subscriptions.push(
             vscode.window.onDidChangeActiveTextEditor(() => {
                 this.update();
             })
         );
-
-        this.update();
     }
 
     public resolveWebviewView(
@@ -40,6 +40,14 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
     ) {
         OUTPUT_CHANNEL.appendLine("Resolving Robot Output webview.");
         this.view = webviewView;
+
+        webviewView.webview.onDidReceiveMessage(async (message) => {
+            if (message.type == "event") {
+                if (message.event == "onClickReference") {
+                    OUTPUT_CHANNEL.appendLine(JSON.stringify(message));
+                }
+            }
+        });
 
         webviewView.onDidChangeVisibility(() => {
             this.updateHTML(undefined);
@@ -55,6 +63,9 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
 
         webviewView.onDidDispose(() => {
             this.view = undefined;
+            for (const sub of this.subscriptions) {
+                sub.dispose();
+            }
         });
 
         this.updateHTML(token);
@@ -87,16 +98,7 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
             }
             const decoded = new TextDecoder("utf-8").decode(indexContents);
             const scriptUri = this.view.webview.asWebviewUri(vscode.Uri.joinPath(this.localResourceRoot, "bundle.js"));
-            html = decoded
-                .replaceAll("return getDummyOutputFileContents();", "return '';")
-                .replaceAll("bundle.js", scriptUri.toString())
-                .replaceAll(
-                    "onClickReference = console.log",
-                    `onClickReference = (element)=>{
-	                    console.log(element);
-	                }
-	                `
-                );
+            html = decoded.replaceAll("bundle.js", scriptUri.toString());
         } catch (error) {
             html = "Error loading HTML: " + error;
         }
@@ -184,7 +186,7 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
             }
             text = converted;
         }
-        webview.postMessage({ command: "setContents", outputFileContents: text });
+        webview.postMessage({ type: "request", command: "setContents", "outputFileContents": text });
     }
 }
 
