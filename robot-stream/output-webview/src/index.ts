@@ -125,7 +125,7 @@ function main(opts: IOpts) {
         "source": undefined,
         "lineno": undefined,
     };
-    const stack = [];
+    const stack: IContentAdded[] = [];
     stack.push(parent);
     let suiteName = "";
     let suiteSource = "";
@@ -135,7 +135,6 @@ function main(opts: IOpts) {
                 // start suite
                 suiteName = msg.decoded["name"] + ".";
                 suiteSource = msg.decoded["source"];
-                console.log("suite source", suiteSource);
                 // parent = addContainer(opts, parent, msg.decoded["name"], msg, true);
                 // stack.push(parent);
                 break;
@@ -174,16 +173,12 @@ function main(opts: IOpts) {
                 suiteName = "";
                 break;
             case "ET": // end test
+                onEnd(opts, stack, parent, msg);
+                onTestEndUpdateSummary(msg);
+                parent = stack.at(-1);
+                break;
             case "EK": // end keyword
-                const status = msg.decoded["status"];
-                if (acceptStatus(opts, status)) {
-                    const summary = parent.summary;
-                    addStatus(summary, status);
-                } else {
-                    parent.li.remove();
-                }
-
-                stack.pop();
+                onEnd(opts, stack, parent, msg);
                 parent = stack.at(-1);
                 break;
             case "KA":
@@ -194,6 +189,43 @@ function main(opts: IOpts) {
     }
 
     return main;
+}
+
+let totalTests: number = 0;
+let totalFailures: number = 0;
+function onTestEndUpdateSummary(msg: any) {
+    const status = msg.decoded["status"];
+    totalTests += 1;
+    if (status == "FAIL" || status == "ERROR") {
+        totalFailures += 1;
+    }
+    const totalTestsStr = ("" + totalTests).padStart(4);
+    const totalFailuresStr = ("" + totalFailures).padStart(4);
+    const summary: HTMLDivElement = <HTMLDivElement>document.getElementById("summary");
+    summary.textContent = `Total: ${totalTestsStr} Failures: ${totalFailuresStr}`;
+
+    if (totalFailures == 1) {
+        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
+        resultBar.classList.remove("NOT_RUN");
+        resultBar.classList.remove("PASS");
+        resultBar.classList.add("FAIL");
+    } else if (totalFailures == 0 && totalTests == 1) {
+        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
+        resultBar.classList.remove("NOT_RUN");
+        resultBar.classList.remove("FAIL");
+    }
+}
+
+function onEnd(opts: IOpts, stack: IContentAdded[], parent: IContentAdded, msg: any) {
+    const status = msg.decoded["status"];
+    if (acceptStatus(opts, status)) {
+        const summary = parent.summary;
+        addStatus(summary, status);
+    } else {
+        parent.li.remove();
+    }
+
+    stack.pop();
 }
 
 function onClickReference(message) {
