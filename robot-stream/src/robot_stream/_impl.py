@@ -65,7 +65,7 @@ class _RobotOutputImpl:
         return self._current_file
 
     @property
-    def initial_time(self):
+    def initial_time(self) -> datetime.datetime:
         return self._initial_time
 
     def _rotate_output(self):

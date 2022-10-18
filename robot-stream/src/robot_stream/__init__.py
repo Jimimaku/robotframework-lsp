@@ -33,7 +33,7 @@ class RFStream:
         return self._robot_output_impl
 
     @property
-    def initial_time(self):
+    def initial_time(self) -> datetime.datetime:
         return self._robot_output_impl.initial_time
 
     def _get_time_delta(self, attributes) -> float:

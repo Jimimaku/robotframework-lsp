@@ -60,6 +60,10 @@ jobs:
         run: |
           black --check ./robocorp-python-ls-core --exclude=vendored --exclude=libs
           
+      - name: Black check robot-stream
+        run: |
+          black --check ./robot-stream --exclude=vendored --exclude=libs
+          
       - name: mypy create env
         run: |
           python -m venv .venv

@@ -2,11 +2,11 @@ import datetime
 import json
 
 
-def version_decode(decoder, message):
+def version_decode(decoder, message: str) -> str:
     return f"VERSION: {message}"
 
 
-def simple_decode(decoder, message):
+def simple_decode(decoder, message: str) -> str:
     return f"INFO: {json.loads(message)}"
 
 
