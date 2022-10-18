@@ -108,6 +108,10 @@ export function updateFilterLevel(filterLevel: "FAIL" | "WARN" | "PASS") {
 
 function main(opts: IOpts) {
     lastOpts = opts;
+    totalTests = 0;
+    totalFailures = 0;
+    updateSummary();
+
     const mainDiv: HTMLElement = document.getElementById("mainTree");
     mainDiv.replaceChildren(); // clear all children
 
@@ -199,12 +203,20 @@ function onTestEndUpdateSummary(msg: any) {
     if (status == "FAIL" || status == "ERROR") {
         totalFailures += 1;
     }
+    updateSummary();
+}
+function updateSummary() {
     const totalTestsStr = ("" + totalTests).padStart(4);
     const totalFailuresStr = ("" + totalFailures).padStart(4);
     const summary: HTMLDivElement = <HTMLDivElement>document.getElementById("summary");
     summary.textContent = `Total: ${totalTestsStr} Failures: ${totalFailuresStr}`;
 
-    if (totalFailures == 1) {
+    if (totalFailures == 0 && totalTests == 0) {
+        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
+        resultBar.classList.add("NOT_RUN");
+        resultBar.classList.remove("PASS");
+        resultBar.classList.remove("FAIL");
+    } else if (totalFailures == 1) {
         const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
         resultBar.classList.remove("NOT_RUN");
         resultBar.classList.remove("PASS");

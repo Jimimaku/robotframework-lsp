@@ -23,9 +23,14 @@ class RFStream:
         # Attributes expected to be used just when used in-memory.
         write = kwargs.get("__write__")
         initial_time = kwargs.get("__initial_time__")
+        robot_version = kwargs.get("__robot_version__")
 
         self._robot_output_impl = _RobotOutputImpl(
-            output_dir, port, write=write, initial_time=initial_time
+            output_dir,
+            port,
+            write=write,
+            initial_time=initial_time,
+            robot_version=robot_version,
         )
 
     @property

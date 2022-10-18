@@ -267,7 +267,9 @@ def convert_xml_to_rfstream(source, write: Optional[Callable[[str], None]] = Non
         initial_date_str = robot_attrs["generated"]
         initial_time = parse_time(initial_date_str)
         listener = RFStream(
-            __write__=write, __initial_time__=initial_time, robot_version="<not loaded>"
+            __write__=write,
+            __initial_time__=initial_time,
+            __robot_version__="<not loaded>",
         )
         return listener
 

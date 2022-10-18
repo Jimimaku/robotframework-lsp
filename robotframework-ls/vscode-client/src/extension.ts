@@ -816,8 +816,9 @@ export async function activate(context: ExtensionContext) {
             })
         );
         const outputProvider = new RobotOutputViewProvider(context);
+        const options = { webviewOptions: { retainContextWhenHidden: true } };
         context.subscriptions.push(
-            vscode.window.registerWebviewViewProvider(RobotOutputViewProvider.viewType, outputProvider)
+            vscode.window.registerWebviewViewProvider(RobotOutputViewProvider.viewType, outputProvider, options)
         );
 
         registerDebugger();
