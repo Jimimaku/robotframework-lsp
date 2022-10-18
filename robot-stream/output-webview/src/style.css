@@ -1,0 +1,123 @@
+:root {
+    --fg-color: var(--vscode-editor-foreground);
+    --bg-color: var(--vscode-editor-background);
+    --font-family: var(--vscode-editor-font-family);
+    --font-size: var(--vscode-editor-font-size);
+    --font-weight: var(--vscode-font-weight);
+    /* 
+    --fg-color: white;
+    --bg-color: #4b4a4a;
+    --font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; 
+    */
+}
+
+.summaryField {
+    margin-left: 3px;
+    margin-right: 3px;
+}
+
+body {
+    font-family: var(--font-family);
+    font-size: var(--font-size);
+    font-weight: var(--font-weight);
+    color: var(--fg-color);
+    background-color: var(--bg-color);
+}
+
+ul {
+    list-style-type: none;
+    padding-inline-start: 0px;
+}
+
+div ul:not(:first-child) {
+    border-left: 1px dotted rgb(141, 141, 141);
+}
+
+.tree li {
+    display: block;
+    position: relative;
+    padding-left: 0px;
+}
+
+.tree ul {
+    margin-left: 10px;
+    padding-left: 0;
+}
+
+details > summary {
+    /* list-style-image: url("data:image/svg+xml;utf8,<svg width='20px' height='20px' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><g data-name='Layer 2'><g data-name='arrow-ios-forward'><rect width='24' height='24' transform='rotate(-90 12 12)' opacity='0'/><path d='M10 19a1 1 0 0 1-.64-.23 1 1 0 0 1-.13-1.41L13.71 12 9.39 6.63a1 1 0 0 1 .15-1.41 1 1 0 0 1 1.46.15l4.83 6a1 1 0 0 1 0 1.27l-5 6A1 1 0 0 1 10 19z'/></g></g></svg>"); */
+    /* list-style-type: "⮞ "; */
+    list-style-type: "+ ";
+}
+
+details[open] > summary {
+    /* list-style-image: url("data:image/svg+xml;utf8,<svg width='20px' height='20px' viewBox='0 0 24 24' xmlns='http://www.w3.org/2000/svg'><g data-name='Layer 2'><g data-name='arrow-ios-downward'><rect width='24' height='24' opacity='0'/><path d='M12 16a1 1 0 0 1-.64-.23l-6-5a1 1 0 1 1 1.28-1.54L12 13.71l5.36-4.32a1 1 0 0 1 1.41.15 1 1 0 0 1-.14 1.46l-6 4.83A1 1 0 0 1 12 16z'/></g></g></svg>"); */
+    /* list-style-type: "⮟ "; */
+    list-style-type: "- ";
+}
+
+select {
+    background-color: var(--vscode-menu-background);
+    color: var(--vscode-menu-foreground);
+}
+
+summary {
+    /* border: 1px dotted lightgray; */
+    /* border-radius: 0.1rem; */
+    /* padding: 0.5rem; */
+    padding: 3px;
+}
+
+a:link {
+    color: var(--fg-color);
+}
+
+a:visited {
+    color: var(--fg-color);
+}
+
+a:hover {
+    color: var(--fg-color);
+}
+
+a:active {
+    color: var(--fg-color);
+}
+
+.label {
+    padding: 2px 2px;
+    font-size: 0.65em;
+    letter-spacing: 1px;
+    white-space: nowrap;
+    border-radius: 3px;
+    margin-right: 5px;
+    font-weight: bold;
+}
+
+.FAIL,
+.ERROR {
+    background-color: var(--vscode-editorError-foreground);
+    color: var(--vscode-button-foreground);
+}
+
+.PASS {
+    background-color: var(--vscode-inputValidation-infoBorder);
+    color: var(--vscode-button-foreground);
+}
+
+.NOT_RUN {
+    background-color: var(--vscode-editor-foreground);
+    color: var(--vscode-editor-background);
+}
+
+.span_link::after {
+    content: " ⮳";
+}
+.span_link {
+    cursor: pointer;
+    /* text-decoration: underline; */
+}
+
+summary:hover {
+    background-color: var(--vscode-editor-hoverHighlightBackground);
+}
