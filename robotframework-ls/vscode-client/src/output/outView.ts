@@ -40,10 +40,27 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
     ) {
         OUTPUT_CHANNEL.appendLine("Resolving Robot Output webview.");
         this.view = webviewView;
-        this.finishInit(context, token);
+
+        webviewView.onDidChangeVisibility(() => {
+            this.updateHTML(undefined);
+            // NOTE: Change to this.update after testing!!
+            // NOTE: Change to this.update after testing!!
+            // NOTE: Change to this.update after testing!!
+            // NOTE: Change to this.update after testing!!
+            // NOTE: Change to this.update after testing!!
+            // NOTE: Change to this.update after testing!!
+            // NOTE: Change to this.update after testing!!
+            // this.update();
+        });
+
+        webviewView.onDidDispose(() => {
+            this.view = undefined;
+        });
+
+        this.updateHTML(token);
     }
 
-    private async finishInit(context: vscode.WebviewViewResolveContext, token: vscode.CancellationToken) {
+    private async updateHTML(token: vscode.CancellationToken | undefined) {
         if (!this.localResourceRoot) {
             this.localResourceRoot = await getLocalResourceRoot(this.extensionUri);
         }
@@ -51,7 +68,7 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
         if (this.localResourceRoot) {
             localResourceRoots.push(this.localResourceRoot);
         }
-        if (token.isCancellationRequested) {
+        if (token?.isCancellationRequested) {
             return;
         }
 
@@ -61,19 +78,11 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
             localResourceRoots: localResourceRoots,
         };
 
-        webviewView.onDidChangeVisibility(() => {
-            this.update();
-        });
-
-        webviewView.onDidDispose(() => {
-            this.view = undefined;
-        });
-
         let html: string;
         try {
             const indexHTML: vscode.Uri = vscode.Uri.joinPath(this.localResourceRoot, "index.html");
             const indexContents: Uint8Array = await vscode.workspace.fs.readFile(indexHTML);
-            if (token.isCancellationRequested) {
+            if (token?.isCancellationRequested) {
                 return;
             }
             const decoded = new TextDecoder("utf-8").decode(indexContents);
