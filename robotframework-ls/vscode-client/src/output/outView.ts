@@ -38,13 +38,23 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
         context: vscode.WebviewViewResolveContext,
         token: vscode.CancellationToken
     ) {
-        OUTPUT_CHANNEL.appendLine("Resolving Robot Output webview.");
         this.view = webviewView;
 
         webviewView.webview.onDidReceiveMessage(async (message) => {
             if (message.type == "event") {
                 if (message.event == "onClickReference") {
-                    OUTPUT_CHANNEL.appendLine(JSON.stringify(message));
+                    // OUTPUT_CHANNEL.appendLine(JSON.stringify(message));
+                    const data = message.data;
+                    if (data) {
+                        const source = data["source"];
+                        let lineno: number = data["lineno"];
+                        if (source && lineno) {
+                            lineno -= 1;
+                            const start = new vscode.Position(lineno, 0);
+                            const options = { selection: new vscode.Selection(start, start) };
+                            const editor = await vscode.window.showTextDocument(vscode.Uri.file(source), options);
+                        }
+                    }
                 }
             }
         });

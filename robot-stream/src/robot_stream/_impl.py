@@ -55,9 +55,10 @@ class _RobotOutputImpl:
             initial_time = datetime.datetime.now()
         self._initial_time = initial_time
 
+        self._robot_version = robot_version
+
         self._rotate_output()
         self._id_generator = _gen_id()
-        self._robot_version = robot_version
 
     @property
     def current_file(self):
@@ -198,7 +199,9 @@ class _RobotOutputImpl:
             ],
         )
 
-    def start_keyword(self, name, libname, keyword_type, doc, start_time_delta, args):
+    def start_keyword(
+        self, name, libname, keyword_type, doc, source, lineno, start_time_delta, args
+    ):
         oid = self._obtain_id
         self._write_with_separator(
             "SK ",
@@ -207,6 +210,8 @@ class _RobotOutputImpl:
                 oid(libname),
                 oid(keyword_type),
                 oid(doc),
+                oid(source),
+                self._number(lineno),
                 self._number(start_time_delta),
             ],
         )

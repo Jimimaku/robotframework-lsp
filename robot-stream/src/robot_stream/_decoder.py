@@ -84,11 +84,20 @@ def end_task_or_test(decoder, message):
 def start_keyword(decoder, message):
     ident = decoder.ident
     decoder.level += 1
-    name_id, libname_id, type_id, doc_id, time_delta_in_seconds = message.split("|")
+    (
+        name_id,
+        libname_id,
+        type_id,
+        doc_id,
+        source_id,
+        lineno,
+        time_delta_in_seconds,
+    ) = message.split("|")
     keyword_type = _color_name(decoder.memo[type_id])
     name = _color_name(decoder.memo[name_id])
     libname = decoder.memo[libname_id]
     doc = decoder.memo[doc_id]
+    source = decoder.memo[source_id]
     return f"{ident}START {keyword_type}: name: {name} - libname: {libname} - doc: {doc} - elapsed: {time_delta_in_seconds}s"
 
 

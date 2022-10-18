@@ -40,14 +40,13 @@ function decode_memo(decoder, message) {
 }
 
 function start_suite(decoder, message) {
-    var ident, name, name_id, suite_id, suite_id_id, suite_source, suite_source_id, time_delta_in_seconds;
-    ident = decoder.ident;
+    let ident = decoder.ident;
     decoder.level += 1;
-    [name_id, suite_id_id, suite_source_id, time_delta_in_seconds] = message.split("|");
-    name = decoder.memo[name_id];
-    suite_id = decoder.memo[suite_id_id];
-    suite_source = decoder.memo[suite_source_id];
-    return { name, suite_id, suite_source, time_delta_in_seconds };
+    let [name_id, suite_id_id, suite_source_id, time_delta_in_seconds] = message.split("|");
+    let name = decoder.memo[name_id];
+    let suite_id = decoder.memo[suite_id_id];
+    let source = decoder.memo[suite_source_id];
+    return { name, suite_id, source, time_delta_in_seconds };
 }
 
 function end_suite(decoder, message) {
@@ -60,13 +59,13 @@ function end_suite(decoder, message) {
 }
 
 function start_task_or_test(decoder, message) {
-    var ident, line, name, name_id, suite_id, suite_id_id, time_delta_in_seconds;
-    ident = decoder.ident;
+    let ident = decoder.ident;
     decoder.level += 1;
-    [name_id, suite_id_id, line, time_delta_in_seconds] = message.split("|");
-    name = decoder.memo[name_id];
-    suite_id = decoder.memo[suite_id_id];
-    return { name, suite_id, line, time_delta_in_seconds };
+    let [name_id, suite_id_id, lineno, time_delta_in_seconds] = message.split("|");
+    let name = decoder.memo[name_id];
+    let suite_id = decoder.memo[suite_id_id];
+    lineno = parseInt(lineno);
+    return { name, suite_id, lineno, time_delta_in_seconds };
 }
 
 function end_task_or_test(decoder, message) {
@@ -80,15 +79,16 @@ function end_task_or_test(decoder, message) {
 }
 
 function start_keyword(decoder, message) {
-    var doc, doc_id, ident, keyword_type, libname, libname_id, name, name_id, time_delta_in_seconds, type_id;
-    ident = decoder.ident;
+    let ident = decoder.ident;
     decoder.level += 1;
-    [name_id, libname_id, type_id, doc_id, time_delta_in_seconds] = message.split("|");
-    keyword_type = decoder.memo[type_id];
-    name = decoder.memo[name_id];
-    libname = decoder.memo[libname_id];
-    doc = decoder.memo[doc_id];
-    return { keyword_type, name, libname, doc, time_delta_in_seconds };
+    let [name_id, libname_id, type_id, doc_id, source_id, lineno, time_delta_in_seconds] = message.split("|");
+    let keyword_type = decoder.memo[type_id];
+    let name = decoder.memo[name_id];
+    let libname = decoder.memo[libname_id];
+    let doc = decoder.memo[doc_id];
+    let source = decoder.memo[source_id];
+    lineno = parseInt(lineno);
+    return { keyword_type, name, libname, doc, time_delta_in_seconds, source, lineno };
 }
 
 function end_keyword(decoder, message) {

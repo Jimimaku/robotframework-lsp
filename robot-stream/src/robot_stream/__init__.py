@@ -100,7 +100,9 @@ class RFStream:
         return self._robot_output_impl.start_test(
             name,
             attributes["id"],
-            attributes.get("lineno"),
+            attributes.get(
+                "lineno"
+            ),  # The source is already given by the suite (no need to repeat)
             self._get_time_delta(attributes),
         )
 
@@ -145,6 +147,8 @@ class RFStream:
             attributes.get("libname"),
             attributes.get("type"),
             attributes.get("doc"),
+            attributes.get("source"),
+            attributes.get("lineno"),
             self._get_time_delta(attributes),
             attributes.get("args"),
         )

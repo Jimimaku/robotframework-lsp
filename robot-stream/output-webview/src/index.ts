@@ -1,6 +1,6 @@
 import { Decoder, IMessage, iter_decoded_log_format } from "./decoder";
 import "./style.css";
-import { requestToHandler, sendEventToClient, nextMessageSeq, IEventMessage} from "./vscodeComm";
+import { requestToHandler, sendEventToClient, nextMessageSeq, IEventMessage } from "./vscodeComm";
 
 // Interesting reads:
 // https://medium.com/metaphorical-web/javascript-treeview-controls-devil-in-the-details-74c252e00ed8
@@ -13,6 +13,8 @@ interface IContentAdded {
     details: HTMLElement;
     summary: HTMLElement;
     span: HTMLElement;
+    source: string;
+    lineno: number;
 }
 
 function addContainer(
@@ -20,7 +22,9 @@ function addContainer(
     parent: IContentAdded,
     content: string,
     decodedMessage: IMessage,
-    open: boolean
+    open: boolean,
+    source: string,
+    lineno: number
 ): IContentAdded {
     // <li>
     //   <details open>
@@ -52,11 +56,16 @@ function addContainer(
         span.classList.add("span_link");
         span.onclick = (ev) => {
             ev.preventDefault();
-            opts.onClickReference(decodedMessage);
+            opts.onClickReference({
+                source,
+                lineno,
+                "message": decodedMessage.decoded,
+                "messageType": decodedMessage.message_type,
+            });
         };
     }
 
-    return { ul, li, details, summary, span };
+    return { ul, li, details, summary, span, source, lineno };
 }
 
 function addStatus(summary: HTMLElement, status: string) {
@@ -113,22 +122,35 @@ function main(opts: IOpts) {
         "details": undefined,
         "summary": undefined,
         "span": undefined,
+        "source": undefined,
+        "lineno": undefined,
     };
     const stack = [];
     stack.push(parent);
     let suiteName = "";
+    let suiteSource = "";
     for (const msg of iter_decoded_log_format(opts.outputFileContents)) {
         switch (msg.message_type) {
             case "SS":
                 // start suite
                 suiteName = msg.decoded["name"] + ".";
+                suiteSource = msg.decoded["source"];
+                console.log("suite source", suiteSource);
                 // parent = addContainer(opts, parent, msg.decoded["name"], msg, true);
                 // stack.push(parent);
                 break;
 
             case "ST":
                 // start test
-                parent = addContainer(opts, parent, suiteName + msg.decoded["name"], msg, false);
+                parent = addContainer(
+                    opts,
+                    parent,
+                    suiteName + msg.decoded["name"],
+                    msg,
+                    false,
+                    suiteSource,
+                    msg.decoded["lineno"]
+                );
                 stack.push(parent);
                 break;
             case "SK":
@@ -142,7 +164,9 @@ function main(opts: IOpts) {
                     parent,
                     `${msg.decoded["keyword_type"]} - ${libname}${msg.decoded["name"]}`,
                     msg,
-                    false
+                    false,
+                    msg.decoded["source"],
+                    msg.decoded["lineno"]
                 );
                 stack.push(parent);
                 break;
@@ -160,7 +184,7 @@ function main(opts: IOpts) {
                 }
 
                 stack.pop();
-                parent = stack.at(stack.length - 1);
+                parent = stack.at(-1);
                 break;
             case "KA":
                 const item: IContentAdded = stack.at(-1);
@@ -182,10 +206,7 @@ function onClickReference(message) {
     sendEventToClient(ev);
 }
 
-let lastContents = undefined;
-
 requestToHandler["setContents"] = function setContents(msg) {
-    lastContents = msg.outputFileContents;
     main({
         outputFileContents: msg.outputFileContents,
         filterLevel: "PASS",
