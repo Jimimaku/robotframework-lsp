@@ -178,6 +178,15 @@ class RFStream:
             attributes["status"], self._get_time_delta(attributes)
         )
 
+    def log_message(self, message):
+        # {
+        #     "timestamp": "20221019 10:00:07.928",
+        #     "message": "{'timestamp': '20221019 10:00:07.928', 'message': '1', 'level': 'INFO', 'html': 'no'}",
+        #     "level": "INFO",
+        #     "html": "no",
+        # }
+        pass
+
 
 def iter_decoded_log_format(stream):
     from ._decoder import iter_decoded_log_format
