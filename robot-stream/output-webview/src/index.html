@@ -8,19 +8,20 @@
     <div style="display: none">Some text is here</div>
     <body class="vscode-dark" style="padding: 0 0 0 0">
         <div style="display: flex">
+            <div class="summaryField" style="flex-grow: 1" id="summary" class="NOT_RUN">Total:&nbsp;&nbsp;&nbsp;&nbsp;Failures:&nbsp;&nbsp;&nbsp;&nbsp;</div>
             <div class="summaryField" style="flex-grow: 1">
+                <div style="display:flex">
+                    <span>Filter:&nbsp;</span>
+                    <select name="filterLevel" id="filterLevel" style="flex-grow: 1" onchange="window.onChangedFilterLevel()">
+                        <option value="FAIL">FAIL</option>
+                        <option value="WARN">WARN</option>
+                        <option value="PASS" selected="selected">PASS</option>
+                    </select>
+                </div>
+            </div>
+            <div class="summaryField" style="flex-grow: 2">
                 <select name="selectedRun" id="selectedRun" onchange="window.onChangedRun()" style="width: 100%">
                     <option value="NO_RUN" selected="selected">Select run...</option>
-                </select>
-            </div>
-            <div class="summaryField" id="summary">Total:&nbsp;&nbsp;&nbsp;&nbsp;Failures:&nbsp;&nbsp;&nbsp;&nbsp;</div>
-            <div class="summaryField NOT_RUN" style="flex-grow: 1" id="resultBar"></div>
-            <div class="summaryField">
-                Filter:
-                <select name="filterLevel" id="filterLevel" onchange="window.onChangedFilterLevel()">
-                    <option value="FAIL">FAIL</option>
-                    <option value="WARN">WARN</option>
-                    <option value="PASS" selected="selected">PASS</option>
                 </select>
             </div>
         </div>

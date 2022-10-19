@@ -27,6 +27,7 @@ body {
 ul {
     list-style-type: none;
     padding-inline-start: 0px;
+    margin-block-start: 5px;
 }
 
 div ul:not(:first-child) {
@@ -94,20 +95,44 @@ a:active {
     font-weight: bold;
 }
 
-.FAIL,
-.ERROR {
-    background-color: var(--vscode-editorError-foreground);
+.label.FAIL,
+.label.ERROR {
+    border-radius: 3px;
+    /* background-color: var(--vscode-editorError-foreground); */
+    /* background-color: var(--vscode-inputValidation-errorBorder);  high-contrast doesn't have a good color */
+    /* background-color: var(--vscode-testing-iconErrored);  red and green always (not always ideal...) */
+    background-color: var(--vscode-terminalCommandDecoration-errorBackground);
     color: var(--vscode-button-foreground);
+    font-weight: bolder;
 }
 
-.PASS {
-    background-color: var(--vscode-inputValidation-infoBorder);
+.label.PASS {
+    border-radius: 3px;
+    /* background-color: var(--vscode-inputValidation-infoBorder); */
+    /* background-color: var(--vscode-testing-iconPassed); */
+    background-color: var(--vscode-terminalCommandDecoration-successBackground);
     color: var(--vscode-button-foreground);
+    font-weight: bolder;
 }
 
-.NOT_RUN {
+.label.NOT_RUN {
+    border-radius: 3px;
     background-color: var(--vscode-editor-foreground);
     color: var(--vscode-editor-background);
+    font-weight: bolder;
+}
+
+#summary.FAIL,
+#summary.ERROR {
+    border-bottom: 5px solid var(--vscode-terminalCommandDecoration-errorBackground);
+}
+
+#summary.PASS {
+    border-bottom: 5px solid var(--vscode-terminalCommandDecoration-successBackground);
+}
+
+#summary.NOT_RUN {
+    border-bottom: 5px solid var(--vscode-editor-foreground);
 }
 
 .span_link::after {

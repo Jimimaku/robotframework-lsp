@@ -212,17 +212,17 @@ function updateSummary() {
     summary.textContent = `Total: ${totalTestsStr} Failures: ${totalFailuresStr}`;
 
     if (totalFailures == 0 && totalTests == 0) {
-        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
+        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("summary");
         resultBar.classList.add("NOT_RUN");
         resultBar.classList.remove("PASS");
         resultBar.classList.remove("FAIL");
     } else if (totalFailures == 1) {
-        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
+        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("summary");
         resultBar.classList.remove("NOT_RUN");
         resultBar.classList.remove("PASS");
         resultBar.classList.add("FAIL");
     } else if (totalFailures == 0 && totalTests == 1) {
-        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("resultBar");
+        const resultBar: HTMLDivElement = <HTMLDivElement>document.getElementById("summary");
         resultBar.classList.remove("NOT_RUN");
         resultBar.classList.remove("FAIL");
     }
