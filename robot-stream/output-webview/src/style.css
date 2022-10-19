@@ -1,9 +1,28 @@
 :root {
     --fg-color: var(--vscode-editor-foreground);
     --bg-color: var(--vscode-editor-background);
-    --font-family: var(--vscode-editor-font-family);
-    --font-size: var(--vscode-editor-font-size);
+    --font-family: var(--vscode-editor-font-family, monospace, courier);
+    --font-size: var(--vscode-editor-font-size, 14px);
     --font-weight: var(--vscode-font-weight);
+    --menu-background: var(--vscode-menu-background);
+    --menu-foreground: var(--vscode-menu-foreground);
+
+    /* background-color: var(--vscode-editorError-foreground); */
+    /* background-color: var(--vscode-inputValidation-errorBorder);  high-contrast doesn't have a good color */
+    /* background-color: var(--vscode-testing-iconErrored);  red and green always (not always ideal...) */
+    --error-background-color: var(--vscode-terminalCommandDecoration-errorBackground, rgb(201, 28, 28));
+    --error-color: var(--vscode-button-foreground, white);
+
+    /* background-color: var(--vscode-inputValidation-infoBorder); */
+    /* background-color: var(--vscode-testing-iconPassed); */
+    --pass-background-color: var(--vscode-terminalCommandDecoration-successBackground, rgb(36, 47, 202));
+    --pass-color: var(--vscode-button-foreground, white);
+
+    --not-run-background-color: var(--vscode-editor-foreground, rgb(102, 102, 102));
+    --not-run-color: var(--vscode-editor-background, white);
+
+    --summary-hover-background-color: var(--vscode-editor-hoverHighlightBackground, rgb(222, 222, 222));
+
     /* 
     --fg-color: white;
     --bg-color: #4b4a4a;
@@ -24,10 +43,14 @@ body {
     background-color: var(--bg-color);
 }
 
+#mainTree{
+    margin-top: 5px;
+}
+
 ul {
     list-style-type: none;
     padding-inline-start: 0px;
-    margin-block-start: 5px;
+    margin-block-start: 0px;
 }
 
 div ul:not(:first-child) {
@@ -58,14 +81,11 @@ details[open] > summary {
 }
 
 select {
-    background-color: var(--vscode-menu-background);
-    color: var(--vscode-menu-foreground);
+    background-color: var(--menu-background);
+    color: var(--menu-foreground);
 }
 
 summary {
-    /* border: 1px dotted lightgray; */
-    /* border-radius: 0.1rem; */
-    /* padding: 0.5rem; */
     padding: 3px;
 }
 
@@ -98,41 +118,36 @@ a:active {
 .label.FAIL,
 .label.ERROR {
     border-radius: 3px;
-    /* background-color: var(--vscode-editorError-foreground); */
-    /* background-color: var(--vscode-inputValidation-errorBorder);  high-contrast doesn't have a good color */
-    /* background-color: var(--vscode-testing-iconErrored);  red and green always (not always ideal...) */
-    background-color: var(--vscode-terminalCommandDecoration-errorBackground);
-    color: var(--vscode-button-foreground);
+    background-color: var(--error-background-color);
+    color: var(--error-color);
     font-weight: bolder;
 }
 
 .label.PASS {
     border-radius: 3px;
-    /* background-color: var(--vscode-inputValidation-infoBorder); */
-    /* background-color: var(--vscode-testing-iconPassed); */
-    background-color: var(--vscode-terminalCommandDecoration-successBackground);
-    color: var(--vscode-button-foreground);
+    background-color: var(--pass-background-color);
+    color: var(--pass-color);
     font-weight: bolder;
 }
 
 .label.NOT_RUN {
     border-radius: 3px;
-    background-color: var(--vscode-editor-foreground);
-    color: var(--vscode-editor-background);
+    background-color: var(--not-run-background-color);
+    color: var(--not-run-color);
     font-weight: bolder;
 }
 
 #summary.FAIL,
 #summary.ERROR {
-    border-bottom: 5px solid var(--vscode-terminalCommandDecoration-errorBackground);
+    border-bottom: 5px solid var(--error-background-color);
 }
 
 #summary.PASS {
-    border-bottom: 5px solid var(--vscode-terminalCommandDecoration-successBackground);
+    border-bottom: 5px solid var(--pass-background-color);
 }
 
 #summary.NOT_RUN {
-    border-bottom: 5px solid var(--vscode-editor-foreground);
+    border-bottom: 5px solid var(--not-run-background-color);
 }
 
 .span_link::after {
@@ -144,5 +159,5 @@ a:active {
 }
 
 summary:hover {
-    background-color: var(--vscode-editor-hoverHighlightBackground);
+    background-color: var(--summary-hover-background-color);
 }

@@ -8,11 +8,18 @@
     <div style="display: none">Some text is here</div>
     <body class="vscode-dark" style="padding: 0 0 0 0">
         <div style="display: flex">
-            <div class="summaryField" style="flex-grow: 1" id="summary" class="NOT_RUN">Total:&nbsp;&nbsp;&nbsp;&nbsp;Failures:&nbsp;&nbsp;&nbsp;&nbsp;</div>
+            <div class="summaryField" style="flex-grow: 1" id="summary" class="NOT_RUN">
+                Total:&nbsp;&nbsp;&nbsp;&nbsp;Failures:&nbsp;&nbsp;&nbsp;&nbsp;
+            </div>
             <div class="summaryField" style="flex-grow: 1">
-                <div style="display:flex">
+                <div style="display: flex">
                     <span>Filter:&nbsp;</span>
-                    <select name="filterLevel" id="filterLevel" style="flex-grow: 1" onchange="window.onChangedFilterLevel()">
+                    <select
+                        name="filterLevel"
+                        id="filterLevel"
+                        style="flex-grow: 1"
+                        onchange="window.onChangedFilterLevel()"
+                    >
                         <option value="FAIL">FAIL</option>
                         <option value="WARN">WARN</option>
                         <option value="PASS" selected="selected">PASS</option>
@@ -29,7 +36,14 @@
         <div id="mainTree"></div>
     </body>
     <script>
-        const vscode = acquireVsCodeApi();
-        window.setVSCodeAPI(vscode);
+        try {
+            const vscode = acquireVsCodeApi();
+            window.setVSCodeAPI(vscode);
+        } catch (err) {
+            // That's ok (not running in VSCode).
+            window.setContents({
+                "outputFileContents": window.getSampleContents(),
+            });
+        }
     </script>
 </html>

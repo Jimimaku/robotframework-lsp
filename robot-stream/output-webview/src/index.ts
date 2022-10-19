@@ -1,4 +1,5 @@
 import { Decoder, IMessage, iter_decoded_log_format } from "./decoder";
+import { getSampleContents } from "./sample";
 import "./style.css";
 import { requestToHandler, sendEventToClient, nextMessageSeq, IEventMessage } from "./vscodeComm";
 
@@ -250,7 +251,7 @@ function onClickReference(message) {
     sendEventToClient(ev);
 }
 
-requestToHandler["setContents"] = function setContents(msg) {
+function setContents(msg) {
     main({
         outputFileContents: msg.outputFileContents,
         filterLevel: "PASS",
@@ -258,6 +259,8 @@ requestToHandler["setContents"] = function setContents(msg) {
         onClickReference: onClickReference,
     });
 };
+
+requestToHandler["setContents"] = setContents;
 
 function onChangedFilterLevel() {
     const filterLevel = document.getElementById("filterLevel");
@@ -268,3 +271,5 @@ function onChangedFilterLevel() {
 function onChangedRun() {}
 window["onChangedRun"] = onChangedRun;
 window["onChangedFilterLevel"] = onChangedFilterLevel;
+window["setContents"] = setContents;
+window["getSampleContents"] = getSampleContents;
