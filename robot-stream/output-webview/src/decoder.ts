@@ -78,18 +78,68 @@ function end_task_or_test(decoder, message) {
     return { status, message, time_delta_in_seconds };
 }
 
-function start_keyword(decoder, message) {
-    let ident = decoder.ident;
-    decoder.level += 1;
-    let [name_id, libname_id, type_id, doc_id, source_id, lineno, time_delta_in_seconds] = message.split("|");
-    let keyword_type = decoder.memo[type_id];
-    let name = decoder.memo[name_id];
-    let libname = decoder.memo[libname_id];
-    let doc = decoder.memo[doc_id];
-    let source = decoder.memo[source_id];
-    lineno = parseInt(lineno);
-    return { keyword_type, name, libname, doc, time_delta_in_seconds, source, lineno };
+function _decodeOid(decoder, oid) {
+    return decoder.memo[oid];
 }
+function _decodeFloat(decoder, msg) {
+    return parseInt(msg);
+}
+function _decodeInt(decoder, msg) {
+    return parseFloat(msg);
+}
+
+function _decode(message_definiton) {
+    const names = [];
+    const nameToDecode = new Map();
+    for (let s of message_definiton.split(",")) {
+        s = s.trim();
+        const i = s.indexOf(":");
+        let decode = "oid";
+        if (i != -1) {
+            [s, decode] = s.split(":");
+        }
+        names.push(s);
+        if (decode === "oid") {
+            nameToDecode.set(s, _decodeOid);
+        } else if (decode === "int") {
+            nameToDecode.set(s, _decodeInt);
+        } else if (decode === "float") {
+            nameToDecode.set(s, _decodeFloat);
+        } else {
+            throw new Error("Unexpected: " + decode);
+        }
+    }
+
+    function _decImpl(decoder, message) {
+        const splitted = message.split("|");
+        const ret = {};
+        for (let index = 0; index < splitted.length; index++) {
+            const s = splitted[index];
+            const name = names[index];
+            ret[name] = nameToDecode.get(name)(decoder, s);
+        }
+        console.log('decoded', ret)
+        return ret;
+    }
+    return _decImpl;
+}
+
+const start_keyword = _decode(
+    "name:oid, libname:oid, keyword_type:oid, doc:oid, source:oid, lineno:int, time_delta_in_seconds:float"
+);
+
+// function start_keyword(decoder, message) {
+//     let ident = decoder.ident;
+//     decoder.level += 1;
+//     let [name_id, libname_id, type_id, doc_id, source_id, lineno, time_delta_in_seconds] = message.split("|");
+//     let keyword_type = decoder.memo[type_id];
+//     let name = decoder.memo[name_id];
+//     let libname = decoder.memo[libname_id];
+//     let doc = decoder.memo[doc_id];
+//     let source = decoder.memo[source_id];
+//     lineno = parseInt(lineno);
+//     return { keyword_type, name, libname, doc, time_delta_in_seconds, source, lineno };
+// }
 
 function end_keyword(decoder, message) {
     var ident, status, status_id, time_delta_in_seconds;
