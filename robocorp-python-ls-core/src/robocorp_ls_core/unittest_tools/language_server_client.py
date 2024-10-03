@@ -13,6 +13,7 @@ from robocorp_ls_core.lsp import (
     CompletionItemTypedDict,
     CompletionResolveResponseTypedDict,
     PositionTypedDict,
+    TextEditTypedDict,
 )
 
 
@@ -239,6 +240,26 @@ class LanguageServerClient(LanguageServerClientBase):
             }
         )
 
+    @implements(ILanguageServerClient.request_code_action)
+    def request_code_action(
+        self, uri: str, line: int, col: int, endline: int, endcol: int
+    ):
+        return self.request(
+            {
+                "jsonrpc": "2.0",
+                "id": self.next_id(),
+                "method": "textDocument/codeAction",
+                "params": {
+                    "textDocument": {"uri": uri},
+                    "range": {
+                        "start": {"line": line, "character": col},
+                        "end": {"line": endline, "character": endcol},
+                    },
+                    "context": {},
+                },
+            }
+        )
+
     @implements(ILanguageServerClient.request_signature_help)
     def request_signature_help(self, uri, line, col):
         return self.request(
@@ -306,6 +327,22 @@ class LanguageServerClient(LanguageServerClientBase):
                 "id": self.next_id(),
                 "method": "textDocument/foldingRange",
                 "params": {"textDocument": {"uri": uri}},
+            }
+        )
+
+    @implements(ILanguageServerClient.request_on_type_formatting)
+    def request_on_type_formatting(
+        self, uri: str, ch: str, line: int, col: int
+    ) -> Optional[List[TextEditTypedDict]]:
+        return self.request(
+            {
+                "jsonrpc": "2.0",
+                "id": self.next_id(),
+                "method": "textDocument/onTypeFormatting",
+                "params": {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": line, "character": col},
+                },
             }
         )
 
@@ -386,6 +423,27 @@ class LanguageServerClient(LanguageServerClientBase):
             }
         )
 
+    @implements(ILanguageServerClient.request_provide_evaluatable_expression)
+    def request_provide_evaluatable_expression(
+        self, uri: str, line: int, col: int
+    ) -> Optional[IIdMessageMatcher]:
+        """
+        :Note: This is a custom message (not part of the language server spec).
+
+        :Note: async complete.
+        """
+        return self.request(
+            {
+                "jsonrpc": "2.0",
+                "id": self.next_id(),
+                "method": "robot/provideEvaluatableExpression",
+                "params": {
+                    "uri": uri,
+                    "position": {"line": line, "character": col},
+                },
+            }
+        )
+
     @implements(ILanguageServerClient.request_workspace_symbols)
     def request_workspace_symbols(self, query: Optional[str] = None):
         return self.request(
@@ -444,6 +502,17 @@ class LanguageServerClient(LanguageServerClientBase):
                 "id": self.next_id(),
                 "method": "workspace/executeCommand",
                 "params": {"command": command, "arguments": arguments},
+            }
+        )
+
+    @implements(ILanguageServerClient.request_sync)
+    def request_sync(self, method, **params):
+        return self.request(
+            {
+                "jsonrpc": "2.0",
+                "id": self.next_id(),
+                "method": method,
+                "params": params,
             }
         )
 

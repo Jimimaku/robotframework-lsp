@@ -1,3 +1,158 @@
+New in 1.13.0 (2024-10-03)
+-----------------------------
+
+### New features
+
+- The `Robot Framework Language Server` can now work both with `Robocorp Code` (which is currently deprecated) 
+  as well as well as with the new `Sema4.ai VSCode extension` (which supersedes `Robocorp Code` for `Robots`
+  development and also has support for developing AI actions).
+
+
+New in 1.12.0 (2024-04-12)
+-----------------------------
+
+### New features
+
+- It's now possible to use a python variable file (with `robot.loadVariablesFromVariablesFile` setting) for linting. [#953](https://github.com/robocorp/robotframework-lsp/issues/953)
+- Added option (`robot.testView.enabled`) to disable test view.
+- Updated versions in dependencies to fix CVEs.
+
+### Bugfixes
+
+- Fixed issue with GitLens. [#1023](https://github.com/robocorp/robotframework-lsp/issues/1023)
+- Fix issue with RF (the EXCEPT target is now in an ASSIGN token instead of VARIABLE).
+- Fix issue with RF (the FOR target is now in an ASSIGN token instead of VARIABLE).
+
+
+New in 1.11.0 (2023-06-07)
+-----------------------------
+
+### New features
+
+- `Robot Framework 6.1.0` is now supported.
+- `ignore_git_dir=True` is now used by default in the `robotframework-tidy` integration.
+- Bundled `robotframework-tidy` upgraded to `4.3.0`.
+- Bundled `robotframework-robocop` upgraded to `3.1.1`.
+
+
+New in 1.10.0 (2023-04-12)
+-----------------------------
+
+### New features
+
+- `robotfamework-output-stream` updated to `0.0.6`. It now has functionality to hide sensitive data.
+    See: https://github.com/robocorp/robotframework-output-stream/blob/master/docs/handling_sensitive_data.md
+- Variables in variable subscript are now properly found. [#889](https://github.com/robocorp/robotframework-lsp/issues/889)
+
+
+### Bugfixes
+
+- If the user completes something as `$var`, complete to `${variable}` instead of `$${variable}`.
+
+
+New in 1.9.0 (2023-02-03)
+-----------------------------
+
+### New features
+
+- Code action: Surround with try..except.
+- Code action: Surround with try..except..finally.
+- Interactive Console: (Robot Framework 4 onwards): When a single keyword call is executed and it has a non-None return, its return value is printed.
+- Interactive Console: Typing a variable in the `Interactive Console` shows that variable. [#871](https://github.com/robocorp/robotframework-lsp/issues/871)
+- Improve `IF`/`WHILE`/`Run Keyword If` snippet completions to make it a bit clearer that python expressions are expected.
+- Building the model of the flow explorer no longer times out and a progress dialog is shown while building it.
+- `robot.libraries.blacklist` can be used to blacklist libraries which should never appear in code-completion.
+- Deprecated libraries:
+    - `robot.libraries.deprecated` can be used to mark libraries as deprecated.
+    - Keywords from deprecated libraries will not appear in the auto-import code-completion (so, they'll only be available if the `Library` is added to the `Settings`).
+    - Libraries which start with `*DEPRECATED*` in its doc are also considered deprecated.
+    - Keywords from libraries marked as deprecated will be shown as deprecated.
+- Requesting completions right after `Libraries   ` without any additional name will show completions for all known (pre-loaded) libraries.
+- Completions for variables are shown without having to enter `$` nor `${`.
+
+
+### Bugfixes
+
+- Properly report about undefined variable in `RETURN`. [#865](https://github.com/robocorp/robotframework-lsp/issues/865)
+- References to variables used in `Evaluate` arguments are now properly collected.
+- Don't show completion for the variable being currently defined in variable assign. 
+
+
+New in 1.8.0 (2023-01-23)
+-----------------------------
+
+### New features
+
+- New snippet completions for WHILE without limit, CONTINUE, BREAK, RETURN, ELSE. [#856](https://github.com/robocorp/robotframework-lsp/issues/856)
+- New line customization:
+    - If a line starts with `#` if a new line is entered before the end of the line a `#` is added in the new line
+    - If a line is split a continuation (`...`) is added.
+- Quick fix: create `local variable` from an `undefined variable`.
+- Quick fix: create `variable in the variables section` from an `undefined variable`.
+- Quick fix: create `argument` from an `undefined variable`.
+- Code action: assign to variable.
+- Refactoring: extract `local variable`.
+- Refactoring: extract `variable` to `variables section`.
+
+### Bugfixes
+
+- Text ranges when dealing with emoji unicode characters are now correct. [#862](https://github.com/robocorp/robotframework-lsp/issues/862)  
+- Code analysis fix:  An arguments with a name with '=' must match a star arg with the full name if the name was already found (in RF keyword and not python method). [#860](https://github.com/robocorp/robotframework-lsp/issues/860)
+
+
+New in 1.7.3 (2022-12-16)
+-----------------------------
+
+### Bugfixes
+
+- Debugger: Fixed issue where the stack of the debugger could end up being unsynchronized.
+- Don't prefix module name for keywords in the current module. [#843](https://github.com/robocorp/robotframework-lsp/issues/843)
+
+
+New in 1.7.0 (2022-12-13)
+-----------------------------
+
+### New features
+
+- It's possible to make a launch with a target in the arguments by specifying `<target-in-args>` as the target.
+
+### Bugfixes
+
+- Properly collect references for keywords with variables in the name. [#827](https://github.com/robocorp/robotframework-lsp/issues/827)
+- Add placeholders when completing keywords with variables in the name. [#824](https://github.com/robocorp/robotframework-lsp/issues/824)
+- If there's some error in a debugger callback, don't break execution. [#841](https://github.com/robocorp/robotframework-lsp/issues/841)
+- Find references for variables embedded in keywords. [#825](https://github.com/robocorp/robotframework-lsp/issues/825)
+
+
+New in 1.6.0 (2022-12-03)
+-----------------------------
+
+### New features
+
+- `Robot Output` view:
+
+  - Now shows the contents of the current run in real time.
+  - Can filter out keywords with `NOT RUN` status.
+  - Hides iteration nodes after the 50th iteration (only if marked as `PASS` or `NOT RUN`).
+  - Embeds HTML contents from log entries with `html=true`. 
+
+- Code completion is now provided for the library name and resource name.
+
+- New Setting to configure keyword completions:
+
+  - `robot.completions.keywords.prefixImportName`: Define whether completions showing keywords should prefix completions with the import name when applied.
+  - `robot.completions.keywords.prefixImportNameIgnore`: Allows defining import names which should not be prefixed for keyword completions. i.e.: `["builtin"]`.
+
+- New Settings to configure completions from keywords *not currently imported* in the current module (a.k.a.: auto-imports):
+
+  - `robot.completions.keywordsNotImported.enable`: Defines whether to show completions for keywords not currently imported (adds the proper import when applied).
+  - `robot.completions.keywordsNotImported.addImport`: Defines whether to actually add the import statement when applying completions showing keywords not currently imported.
+
+### Bugfixes
+
+- Colors in the `Interactive Console` could be wrong on some cases.
+
+
 New in 1.5.0 (2022-11-09)
 -----------------------------
 

@@ -1,5 +1,6 @@
 import * as roboCommands from "./robocorpCommands";
-import { commands, QuickPickItem, window } from "vscode";
+import { commands, QuickPickItem, window, workspace, WorkspaceFolder } from "vscode";
+import { WorkspaceInfo, IVaultInfo, ListWorkspacesActionResult } from "./protocols";
 
 export interface QuickPickItemWithAction extends QuickPickItem {
     action: any;
@@ -34,21 +35,24 @@ export function sortCaptions(captions: QuickPickItemWithAction[]) {
 
 export async function showSelectOneQuickPick(
     items: QuickPickItemWithAction[],
-    message: string
+    message: string,
+    title?: string
 ): Promise<QuickPickItemWithAction> {
     let selectedItem: QuickPickItemWithAction = await window.showQuickPick(items, {
         "canPickMany": false,
         "placeHolder": message,
         "ignoreFocusOut": true,
+        "title": title,
     });
     return selectedItem;
 }
 
-export async function showSelectOneStrQuickPick(items: string[], message: string): Promise<string> {
+export async function showSelectOneStrQuickPick(items: string[], message: string, title?: string): Promise<string> {
     let selectedItem: string = await window.showQuickPick(items, {
         "canPickMany": false,
         "placeHolder": message,
         "ignoreFocusOut": true,
+        "title": title,
     });
     return selectedItem;
 }
@@ -133,3 +137,26 @@ export async function selectWorkspace(title: string, refresh: boolean): Promise<
         }
     } while (true);
 }
+
+export const askForWs = async (): Promise<WorkspaceFolder | undefined> => {
+    let wsFolders: ReadonlyArray<WorkspaceFolder> = workspace.workspaceFolders;
+    if (!wsFolders) {
+        window.showErrorMessage("Unable to do operation (no workspace folder is currently opened).");
+        return undefined;
+    }
+
+    let ws: WorkspaceFolder;
+    if (wsFolders.length == 1) {
+        ws = wsFolders[0];
+    } else {
+        ws = await window.showWorkspaceFolderPick({
+            "placeHolder": "Please select the workspace folder for the operation.",
+            "ignoreFocusOut": true,
+        });
+    }
+    if (!ws) {
+        // Operation cancelled.
+        return undefined;
+    }
+    return ws;
+};

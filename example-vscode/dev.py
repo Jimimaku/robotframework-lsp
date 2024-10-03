@@ -46,7 +46,6 @@ def _fix_contents_version(contents, version):
 
 
 class Dev(object):
-
     def set_version(self, version):
         """
         Sets a new version for robotframework-lsp in all the needed files.
@@ -162,7 +161,6 @@ if __name__ == "__main__":
     if TEST:
         test_lines()
     else:
-
         # Workaround so that fire always prints the output.
         # See: https://github.com/google/python-fire/issues/188
         def Display(lines, out):

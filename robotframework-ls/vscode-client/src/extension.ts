@@ -43,6 +43,9 @@ import { registerDebugger } from "./debugger";
 import { debounce } from "./common";
 import { RobotDocumentationViewProvider } from "./docs";
 import { RobotOutputViewProvider } from "./output/outView";
+import { setupDebugSessionOutViewIntegration } from "./output/outViewRunIntegration";
+import { applySnippetWorkspaceEdit } from "./snippet";
+import { getIntegrationToUse } from "./robocorpOrSema4ai";
 
 interface ExecuteWorkspaceCommandArgs {
     command: string;
@@ -138,18 +141,21 @@ async function getDefaultLanguageServerPythonExecutable(): Promise<ExecutableAnd
     // Try to use the Robocorp Code extension to provide one for us (if it's installed and
     // available).
     try {
-        const languageServerPython: string = await commands.executeCommand<string>("robocorp.getLanguageServerPython");
-        if (languageServerPython) {
-            OUTPUT_CHANNEL.appendLine(
-                "Language server Python executable gotten from robocorp.getLanguageServerPython."
-            );
-            return {
-                executable: [languageServerPython],
-                "message": undefined,
-            };
+        const integration = getIntegrationToUse();
+        if (integration !== "none") {
+            const commandName = `${integration}.getLanguageServerPython`;
+
+            const languageServerPython: string = await commands.executeCommand<string>(commandName);
+            if (languageServerPython) {
+                OUTPUT_CHANNEL.appendLine(`Language server Python executable gotten from ${commandName}.`);
+                return {
+                    executable: [languageServerPython],
+                    "message": undefined,
+                };
+            }
         }
     } catch (error) {
-        // The command may not be available (in this case, go forward and try to find it in the filesystem).
+        logError("Error getting language server python", error, "ERR_GET_LANGUAGE_SERVER_PYTHON");
     }
 
     // If the user hasn't defined an executable, try to see if we can get it
@@ -371,6 +377,15 @@ async function registerLanguageServerListeners(langServer: LanguageClient) {
                 })
             );
             extensionContext.subscriptions.push(
+                langServer.onRequest("$/applySnippetWorkspaceEdit", async (params) => {
+                    const edit: vscode.WorkspaceEdit = await langServer.protocol2CodeConverter.asWorkspaceEdit(
+                        params["edit"]
+                    );
+                    await applySnippetWorkspaceEdit(edit);
+                    return true;
+                })
+            );
+            extensionContext.subscriptions.push(
                 langServer.onRequest("$/executeWorkspaceCommand", async (args: ExecuteWorkspaceCommandArgs) => {
                     // OUTPUT_CHANNEL.appendLine(args.command + " - " + args.arguments);
                     let ret;
@@ -396,17 +411,21 @@ async function startLanguageServer(): Promise<LanguageClient> {
     let langServer: LanguageClient;
     let initializationOptions: object = {};
     try {
-        let pluginsDir: string = await commands.executeCommand<string>("robocorp.getPluginsDir");
-        try {
-            if (pluginsDir && pluginsDir.length > 0) {
-                OUTPUT_CHANNEL.appendLine("Plugins dir: " + pluginsDir + ".");
-                initializationOptions["pluginsDir"] = pluginsDir;
+        const integration = getIntegrationToUse();
+        if (integration !== "none") {
+            let pluginsDir: string = await commands.executeCommand<string>(`${integration}.getPluginsDir`);
+            try {
+                if (pluginsDir && pluginsDir.length > 0) {
+                    OUTPUT_CHANNEL.appendLine("Plugins dir: " + pluginsDir + ".");
+                    initializationOptions["pluginsDir"] = pluginsDir;
+                    initializationOptions["integrationOption"] = integration;
+                }
+            } catch (error) {
+                logError("Error setting pluginsDir.", error, "EXT_PLUGINS_DIR");
             }
-        } catch (error) {
-            logError("Error setting pluginsDir.", error, "EXT_PLUGINS_DIR");
         }
     } catch (error) {
-        // The command may not be available.
+        logError("Error getting plugins dir", error, "ERR_PLUGINS_DIR");
     }
 
     langServer = new LanguageClient(
@@ -416,6 +435,7 @@ async function startLanguageServer(): Promise<LanguageClient> {
     );
 
     await setupTestExplorerSupport();
+    await setupDebugSessionOutViewIntegration(extensionContext);
     // Important: register listeners before starting (otherwise startup progress is not shown).
     await registerLanguageServerListeners(langServer);
 
@@ -713,10 +733,24 @@ async function openFlowExplorer(flowBundleHTMLFolderPath: string, uri?: string) 
         }
 
         const openResult: { result: string; success: boolean; message: string | null } | null =
-            await commands.executeCommand("robot.openFlowExplorer.internal", {
-                "currentFileUri": uri,
-                "htmlBundleFolderPath": flowBundleHTMLFolderPath,
-            });
+            await window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Generating flow explorer model.",
+                    // Note: doing the easy thing to use the command structure we already
+                    // have (so, not cancellable)...
+                    // To make it cancellable we should convert to a language server request message.
+                    cancellable: false,
+                },
+                async (
+                    progress: vscode.Progress<{ message?: string; increment?: number }>,
+                    token: vscode.CancellationToken
+                ): Promise<{ result: string; success: boolean; message: string | null } | null> =>
+                    await commands.executeCommand("robot.openFlowExplorer.internal", {
+                        "currentFileUri": uri,
+                        "htmlBundleFolderPath": flowBundleHTMLFolderPath,
+                    })
+            );
         if (!openResult || !openResult.success) {
             if (!openResult.message) {
                 openResult.message = "<unspecified>";

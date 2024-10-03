@@ -42,6 +42,8 @@ import weakref
 from collections import namedtuple
 import time
 from robocorp_ls_core.watchdog_wrapper import IFSObserver
+from robocorp_ls_core.code_units import convert_utf16_code_unit_to_python
+from robocorp_ls_core.callbacks import Callback
 
 log = get_logger(__name__)
 
@@ -60,9 +62,10 @@ class _DirInfo(object):
 
 
 class _VirtualFSThread(threading.Thread):
-
     SLEEP_AMONG_SCANS = 0.5
     INNER_SLEEP = 0.1
+
+    on_created = Callback()
 
     def __init__(self, virtual_fs):
         from robocorp_ls_core.watchdog_wrapper import IFSWatch
@@ -87,6 +90,7 @@ class _VirtualFSThread(threading.Thread):
         self._dirs_changed = set()
         self._trigger_loop = threading.Event()
         self.on_file_changed = Callback()
+        self.on_created(self)
 
     def _check_need_sleep(self):
         last_sleep = self._last_sleep
@@ -686,7 +690,6 @@ class Document(object):
     def _compute_line_start_offsets(self):
         line_start_offset_to_info = self.__line_start_offsets
         if line_start_offset_to_info is None:
-
             line_start_offset_to_info = []
             offset = 0
             for line in self.iter_lines():
@@ -823,7 +826,6 @@ class Document(object):
 
         # Check for an edit occurring at the very end of the file
         if start_line == len(self._lines):
-
             self._source = self.source + text
             return
 
@@ -851,10 +853,12 @@ class Document(object):
                 continue
 
             if i == start_line:
+                start_col = convert_utf16_code_unit_to_python(line, start_col)
                 new.write(line[:start_col])
                 new.write(text)
 
             if i == end_line:
+                end_col = convert_utf16_code_unit_to_python(line, end_col)
                 new.write(line[end_col:])
 
         self._source = new.getvalue()

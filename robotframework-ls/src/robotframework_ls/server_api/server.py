@@ -1,13 +1,14 @@
 from robocorp_ls_core.python_ls import PythonLanguageServer
 from robocorp_ls_core.basic import overrides
 from robocorp_ls_core.robotframework_log import get_logger, get_log_level
-from typing import Optional, List, Dict, Deque, Tuple, Sequence
+from typing import Optional, List, Dict, Deque, Tuple, Sequence, Set
 from robocorp_ls_core.protocols import (
     IConfig,
     IMonitor,
     ITestInfoTypedDict,
     IWorkspace,
     ActionResultDict,
+    EvaluatableExpressionTypedDict,
 )
 from functools import partial
 from robocorp_ls_core.jsonrpc.endpoint import require_monitor
@@ -26,15 +27,20 @@ from robocorp_ls_core.lsp import (
     WorkspaceEditTypedDict,
     SelectionRangeTypedDict,
     TextDocumentCodeActionTypedDict,
-    ICustomDiagnosticDataTypedDict,
-    CommandTypedDict,
+    TextEditTypedDict,
+    TextDocumentContextTypedDict,
+    Range,
+    CodeActionTypedDict,
+    DiagnosticsTypedDict,
+    Position,
 )
 from robotframework_ls.impl.protocols import (
     IKeywordFound,
     IDefinition,
     ICompletionContext,
-    EvaluatableExpressionTypedDict,
     IVariablesFromArgumentsFileLoader,
+    IVariablesFromVariablesFileLoader,
+    IRobotDocument,
 )
 from robocorp_ls_core.watchdog_wrapper import IFSObserver
 import itertools
@@ -43,7 +49,23 @@ import sys
 import threading
 from robocorp_ls_core.jsonrpc.exceptions import JsonRpcException
 import os
-from robocorp_ls_core import uris
+from robocorp_ls_core import uris, code_units
+from robocorp_ls_core.code_units import (
+    convert_text_edits_pos_to_client_inplace,
+    convert_diagnostics_pos_to_client_inplace,
+    convert_completions_pos_to_client_inplace,
+    convert_workspace_edit_pos_to_client_inplace,
+    convert_range_pos_to_client_inplace,
+    convert_location_or_location_link_pos_to_client_inplace,
+    convert_selection_range_pos_to_client_inplace,
+    convert_code_lens_pos_to_client_inplace,
+    convert_tests_pos_to_client_inplace,
+    convert_evaluatable_expression_pos_to_client_inplace,
+    convert_hover_pos_to_client_inplace,
+    convert_document_highlight_pos_to_client_inplace,
+    convert_code_action_pos_to_client_inplace,
+    convert_references_pos_to_client_inplace,
+)
 
 
 log = get_logger(__name__)
@@ -59,6 +81,7 @@ def complete_all(
     from robotframework_ls.impl import filesystem_section_completions
     from robotframework_ls.impl import keyword_parameter_completions
     from robotframework_ls.impl import auto_import_completions
+    from robotframework_ls.impl import library_names_completions
     from robotframework_ls.impl.collect_keywords import (
         collect_keyword_name_to_keyword_found,
     )
@@ -66,7 +89,15 @@ def complete_all(
 
     ret = section_name_completions.complete(completion_context)
     if not ret:
-        ret.extend(filesystem_section_completions.complete(completion_context))
+        requisites = filesystem_section_completions.get_requisites(completion_context)
+        if requisites:
+            ret.extend(
+                filesystem_section_completions.complete_with_requisites(
+                    completion_context, requisites
+                )
+            )
+            # Variables can also be used on Library/Resource/Variable import names.
+            ret.extend(variable_completions.complete(completion_context))
 
     if not ret:
         token_info = completion_context.get_current_token()
@@ -84,16 +115,15 @@ def complete_all(
                         completion_context, keyword_name_to_keyword_found
                     )
                 )
+                ret.extend(library_names_completions.complete(completion_context))
                 return ret
 
     if not ret:
         ret.extend(variable_completions.complete(completion_context))
+        ret.extend(keyword_parameter_completions.complete(completion_context))
 
     if not ret:
         ret.extend(dictionary_completions.complete(completion_context))
-
-    if not ret:
-        ret.extend(keyword_parameter_completions.complete(completion_context))
 
     return ret
 
@@ -142,6 +172,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         self._completion_contexts_saved: Deque[ICompletionContext] = deque()
         self._variables_from_arguments_files_loader: Sequence[
             IVariablesFromArgumentsFileLoader
+        ] = []
+        self._variables_from_variables_files_loader: Sequence[
+            IVariablesFromVariablesFileLoader
         ] = []
 
     @overrides(PythonLanguageServer._create_config)
@@ -220,6 +253,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
     def m_workspace__did_change_configuration(self, **kwargs):
         from robotframework_ls.impl.robot_lsp_constants import (
             OPTION_ROBOT_VARIABLES_LOAD_FROM_ARGUMENTS_FILE,
+            OPTION_ROBOT_VARIABLES_LOAD_FROM_VARIABLES_FILE,
         )
         from robotframework_ls.impl import robot_localization
 
@@ -233,6 +267,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                 OPTION_ROBOT_VARIABLES_LOAD_FROM_ARGUMENTS_FILE, str, ""
             ).strip()
             if not variables_from_arguments_files:
+                log.debug(
+                    "%s not specified", OPTION_ROBOT_VARIABLES_LOAD_FROM_ARGUMENTS_FILE
+                )
                 self._variables_from_arguments_files_loader = []
 
             else:
@@ -244,15 +281,71 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
                 for v in variables_from_arguments_files.split(","):
                     v = v.strip()
+                    if not v:
+                        continue
                     created_variables_from_arguments_files.append(
                         VariablesFromArgumentsFileLoader(v)
                     )
+                created_variables_from_arguments_files = tuple(
+                    created_variables_from_arguments_files
+                )
                 self._variables_from_arguments_files_loader = (
                     created_variables_from_arguments_files
+                )
+
+                log.debug(
+                    "%s loaders: %s",
+                    OPTION_ROBOT_VARIABLES_LOAD_FROM_ARGUMENTS_FILE,
+                    created_variables_from_arguments_files,
                 )
         except:
             log.exception(
                 f"Error getting options: {OPTION_ROBOT_VARIABLES_LOAD_FROM_ARGUMENTS_FILE}"
+            )
+
+        try:
+            variables_from_variables_files = self.config.get_setting(
+                OPTION_ROBOT_VARIABLES_LOAD_FROM_VARIABLES_FILE, str, ""
+            ).strip()
+            if not variables_from_variables_files:
+                log.debug(
+                    "%s not specified", OPTION_ROBOT_VARIABLES_LOAD_FROM_VARIABLES_FILE
+                )
+                self._variables_from_variables_files_loader = []
+
+            else:
+                from robotframework_ls.impl.variables_from_variable_file import (
+                    VariablesFromVariablesFileLoader,
+                )
+
+                created_variables_from_variables_files = []
+                ws = self._workspace
+                for v in variables_from_variables_files.split(","):
+                    v = v.strip()
+                    if not v:
+                        continue
+                    doc_uri = uris.from_fs_path(v)
+                    resource_doc = ws.get_document(doc_uri, accept_from_file=True)
+                    if resource_doc is not None:
+                        robot_doc = typing.cast(IRobotDocument, resource_doc)
+                        created_variables_from_variables_files.append(
+                            VariablesFromVariablesFileLoader(v, robot_doc)
+                        )
+                created_variables_from_variables_files = tuple(
+                    created_variables_from_variables_files
+                )
+                self._variables_from_variables_files_loader = (
+                    created_variables_from_variables_files
+                )
+
+                log.debug(
+                    "%s loaders: %s",
+                    OPTION_ROBOT_VARIABLES_LOAD_FROM_VARIABLES_FILE,
+                    created_variables_from_variables_files,
+                )
+        except:
+            log.exception(
+                f"Error getting options: {OPTION_ROBOT_VARIABLES_LOAD_FROM_VARIABLES_FILE}"
             )
 
     @overrides(PythonLanguageServer.lint)
@@ -318,7 +411,6 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         from robotframework_ls.impl.robot_lsp_constants import (
             OPTION_ROBOT_LINT_ROBOCOP_ENABLED,
         )
-        from robocorp_ls_core import uris
         from robocorp_ls_core.lsp import Error
         from robotframework_ls.impl.robot_lsp_constants import (
             OPTION_ROBOT_LINT_ENABLED,
@@ -362,7 +454,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
             else:
                 log.debug("Language server linting disabled.")
 
-            lsp_diagnostics = [error.to_lsp_diagnostic() for error in errors]
+            lsp_diagnostics: List[DiagnosticsTypedDict] = [
+                error.to_lsp_diagnostic() for error in errors
+            ]
 
             try:
                 if robocop_enabled:
@@ -392,7 +486,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                     ).to_lsp_diagnostic()
                 )
 
-            return lsp_diagnostics
+            return convert_diagnostics_pos_to_client_inplace(
+                completion_context.doc, lsp_diagnostics
+            )
         except JsonRpcRequestCancelled:
             raise JsonRpcRequestCancelled("Lint cancelled (inside lint)")
         except Exception as e:
@@ -440,12 +536,24 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
         from robotframework_ls.impl import snippets_completions, section_completions
 
-        completions = snippets_completions.complete(completion_context)
+        completions: List[CompletionItemTypedDict] = snippets_completions.complete(
+            completion_context
+        )
         monitor.check_cancelled()
         completions.extend(self._complete_from_completion_context(completion_context))
         completions.extend(section_completions.complete(completion_context))
 
-        return completions
+        # For completions we just need to convert positions if the current
+        # line has non-ascii chars.
+        # Note: We do have 'additionalTextEdits' which happen in other lines, but
+        # in general those always add full new lines, so, that's Ok (but if
+        # we ever change that this would need to be revisited).
+        if completion_context.doc.get_line(line).isascii():
+            return completions  # Fast way out.
+
+        return convert_completions_pos_to_client_inplace(
+            completion_context.doc, completions
+        )
 
     def _complete_from_completion_context(self, completion_context):
         with self._completion_contexts_saved_lock:
@@ -456,23 +564,6 @@ class RobotFrameworkServerApi(PythonLanguageServer):
             self._completion_contexts_saved.append(completion_context)
 
         return complete_all(completion_context)
-
-    def m_section_name_complete(self, doc_uri, line, col):
-        from robotframework_ls.impl import section_name_completions
-
-        completion_context = self._create_completion_context(doc_uri, line, col, None)
-        if completion_context is None:
-            return []
-
-        return section_name_completions.complete(completion_context)
-
-    def m_keyword_complete(self, doc_uri, line, col):
-        from robotframework_ls.impl import keyword_completions
-
-        completion_context = self._create_completion_context(doc_uri, line, col, None)
-        if completion_context is None:
-            return []
-        return keyword_completions.complete(completion_context)
 
     def m_rename(self, doc_uri: str, line: int, col: int, new_name: str):
         func = partial(self._threaded_rename, doc_uri, line, col, new_name)
@@ -492,7 +583,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                 "Error: unable to rename (context could not be created).", 1
             )
 
-        return rename(completion_context, new_name)
+        return convert_workspace_edit_pos_to_client_inplace(
+            completion_context.workspace, rename(completion_context, new_name)
+        )
 
     def m_prepare_rename(self, doc_uri: str, line: int, col: int):
         func = partial(self._threaded_prepare_rename, doc_uri, line, col)
@@ -501,7 +594,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
     def _threaded_prepare_rename(
         self, doc_uri: str, line: int, col: int, monitor: IMonitor
-    ) -> WorkspaceEditTypedDict:
+    ) -> Optional[RangeTypedDict]:
         from robotframework_ls.impl.rename import prepare_rename
 
         completion_context = self._create_completion_context(
@@ -512,7 +605,13 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                 "Error: unable to prepare rename (context could not be created).", 1
             )
 
-        return prepare_rename(completion_context)
+        new_range = prepare_rename(completion_context)
+        if new_range:
+            new_range = convert_range_pos_to_client_inplace(
+                completion_context.doc, new_range
+            )
+
+        return new_range
 
     def m_flow_explorer_model(self, uri):
         func = partial(self._threaded_flow_explorer_model, uri)
@@ -521,7 +620,6 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
     def _threaded_flow_explorer_model(self, uri, monitor) -> ActionResultDict:
         import json
-        from robocorp_ls_core import uris
 
         # Note: it may actually be a directory (in which case we have to
         # collect the robots inside it).
@@ -574,9 +672,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
     def _threaded_find_definition(self, doc_uri, line, col, monitor) -> Optional[list]:
         from robotframework_ls.impl.find_definition import find_definition_extended
-        import os.path
-        from robocorp_ls_core.lsp import Location, Range
-        from robocorp_ls_core import uris
+        from robocorp_ls_core.lsp import Location
         from robocorp_ls_core.lsp import LocationLink
 
         completion_context = self._create_completion_context(
@@ -600,11 +696,20 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                 log.info("Found definition with empty source (%s).", definition)
                 continue
 
-            if not os.path.exists(definition.source):
-                log.info(
-                    "Found definition: %s (but source does not exist).", definition
+            if definition.source == completion_context.doc.path:
+                uri = completion_context.doc.uri
+                doc = completion_context.doc
+            else:
+                uri = uris.from_fs_path(definition.source)
+                doc = completion_context.workspace.get_document(
+                    uri, accept_from_file=True
                 )
-                continue
+                if doc is None:
+                    log.info(
+                        "Found definition: %s (but doc reference is not available).",
+                        definition,
+                    )
+                    continue
 
             lineno = definition.lineno
             if lineno is None or lineno < 0:
@@ -619,10 +724,13 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
             if origin_selection_range is None:
                 ret.append(
-                    Location(
-                        uris.from_fs_path(definition.source),
-                        Range((lineno, col_offset), (end_lineno, end_col_offset)),
-                    ).to_dict()
+                    convert_location_or_location_link_pos_to_client_inplace(
+                        doc,
+                        Location(
+                            uri,
+                            Range((lineno, col_offset), (end_lineno, end_col_offset)),
+                        ).to_dict(),
+                    )
                 )
             else:
                 target_range = Range((lineno, col_offset), (end_lineno, end_col_offset))
@@ -640,12 +748,15 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                         )
 
                 ret.append(
-                    LocationLink(
-                        origin_selection_range,
-                        uris.from_fs_path(definition.source),
-                        target_range=target_range,
-                        target_selection_range=target_selection_range,
-                    ).to_dict()
+                    convert_location_or_location_link_pos_to_client_inplace(
+                        doc,
+                        LocationLink(
+                            origin_selection_range,
+                            uri,
+                            target_range=target_range,
+                            target_selection_range=target_selection_range,
+                        ).to_dict(),
+                    )
                 )
         return ret
 
@@ -654,7 +765,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         func = require_monitor(func)
         return func
 
-    def _threaded_code_format(self, text_document, options, monitor: IMonitor):
+    def _threaded_code_format(
+        self, text_document, options, monitor: IMonitor
+    ) -> List[TextEditTypedDict]:
         from robotframework_ls.impl.formatting import create_text_edit_from_diff
         from robocorp_ls_core.lsp import TextDocumentItem
         import os.path
@@ -670,6 +783,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
         text_document_item = TextDocumentItem(**text_document)
         text = text_document_item.text
+        initial_doc: IRobotDocument
         if not text:
             completion_context = self._create_completion_context(
                 text_document_item.uri, 0, 0, monitor
@@ -677,6 +791,11 @@ class RobotFrameworkServerApi(PythonLanguageServer):
             if completion_context is None:
                 return []
             text = completion_context.doc.source
+            initial_doc = completion_context.doc
+        else:
+            from robotframework_ls.impl.robot_workspace import RobotDocument
+
+            initial_doc = RobotDocument(text_document_item.uri, text)
 
         if not text:
             return []
@@ -703,7 +822,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
         if formatter == OPTION_ROBOT_CODE_FORMATTER_BUILTIN_TIDY:
             try:
-                from robot.tidy import Tidy
+                from robot.tidy import Tidy  # @UnusedImport
             except ImportError:
                 # It's not available in newer versions of RobotFramework.
                 from robotframework_ls.impl.robot_version import get_robot_major_version
@@ -751,7 +870,10 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
         if new_contents is None or new_contents == text:
             return []
-        return [x.to_dict() for x in create_text_edit_from_diff(text, new_contents)]
+        return convert_text_edits_pos_to_client_inplace(
+            initial_doc,
+            [x.to_dict() for x in create_text_edit_from_diff(text, new_contents)],
+        )
 
     def _create_completion_context(
         self, doc_uri, line, col, monitor: Optional[IMonitor]
@@ -773,6 +895,11 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if document is None:
             log.info("Unable to get document for uri: %s.", doc_uri)
             return None
+
+        if col != 0:
+            s = document.get_line(line)
+            col = code_units.convert_utf16_code_unit_to_python(s, col)
+
         return CompletionContext(
             document,
             line,
@@ -781,6 +908,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
             config=self.config,
             monitor=monitor,
             variables_from_arguments_files_loader=self._variables_from_arguments_files_loader,
+            variables_from_variables_files_loader=self._variables_from_variables_files_loader,
             lsp_messages=self._lsp_messages,
         )
 
@@ -801,6 +929,25 @@ class RobotFrameworkServerApi(PythonLanguageServer):
             return None
 
         return signature_help(completion_context)
+
+    def m_on_type_formatting(self, doc_uri: str, ch: str, line: int, col: int):
+        func = partial(self._threaded_on_type_formatting, doc_uri, ch, line, col)
+        func = require_monitor(func)
+        return func
+
+    def _threaded_on_type_formatting(
+        self, doc_uri: str, ch: str, line: int, col: int, monitor: IMonitor
+    ) -> List[TextEditTypedDict]:
+        from robotframework_ls.impl.on_type_formatting import on_type_formatting
+
+        completion_context = self._create_completion_context(
+            doc_uri, line, col, monitor
+        )
+        if completion_context is None:
+            return []
+
+        # Note: convert on unicode if we start to use it.
+        return on_type_formatting(completion_context, ch)
 
     def m_folding_range(self, doc_uri: str):
         func = partial(self._threaded_folding_range, doc_uri)
@@ -832,7 +979,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if completion_context is None:
             return []
 
-        return selection_range(completion_context, positions)
+        return convert_selection_range_pos_to_client_inplace(
+            completion_context.doc, selection_range(completion_context, positions)
+        )
 
     def m_code_lens(self, doc_uri: str):
         func = partial(self._threaded_code_lens, doc_uri)
@@ -848,7 +997,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if completion_context is None:
             return []
 
-        return code_lens(completion_context)
+        return convert_code_lens_pos_to_client_inplace(
+            completion_context.doc, code_lens(completion_context)
+        )
 
     def m_resolve_code_lens(self, **code_lens: CodeLensTypedDict):
         func = partial(self._threaded_resolve_code_lens, code_lens)
@@ -898,6 +1049,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         from robotframework_ls.impl.code_lens import list_tests
         from pathlib import Path
 
+        tests: List[ITestInfoTypedDict]
         path = Path(uris.to_fs_path(doc_uri))
         if path.is_dir():
             tests = []
@@ -911,13 +1063,14 @@ class RobotFrameworkServerApi(PythonLanguageServer):
                     continue
 
                 tests.extend(list_tests(completion_context))
-            return tests
         else:
             completion_context = self._create_completion_context(doc_uri, 0, 0, monitor)
             if completion_context is None:
                 return []
 
-            return list_tests(completion_context)
+            tests = list_tests(completion_context)
+
+        return convert_tests_pos_to_client_inplace(completion_context.doc, tests)
 
     def m_collect_robot_documentation(
         self,
@@ -999,7 +1152,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if completion_context is None:
             return None
 
-        return provide_evaluatable_expression(completion_context)
+        return convert_evaluatable_expression_pos_to_client_inplace(
+            completion_context.doc, provide_evaluatable_expression(completion_context)
+        )
 
     def m_wait_for_full_test_collection(self):
         func = partial(self._threaded_wait_for_full_test_collection)
@@ -1036,7 +1191,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if completion_context is None:
             return None
 
-        return hover(completion_context)
+        return convert_hover_pos_to_client_inplace(
+            completion_context.doc, hover(completion_context)
+        )
 
     def m_document_highlight(self, doc_uri: str, line: int, col: int):
         func = partial(self._threaded_document_highlight, doc_uri, line, col)
@@ -1046,7 +1203,6 @@ class RobotFrameworkServerApi(PythonLanguageServer):
     def _threaded_document_highlight(
         self, doc_uri: str, line, col, monitor: IMonitor
     ) -> Optional[List[DocumentHighlightTypedDict]]:
-
         from robotframework_ls.impl.doc_highlight import doc_highlight
 
         completion_context = self._create_completion_context(
@@ -1055,7 +1211,9 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if completion_context is None:
             return None
 
-        return doc_highlight(completion_context)
+        return convert_document_highlight_pos_to_client_inplace(
+            completion_context.doc, doc_highlight(completion_context)
+        )
 
     def m_code_action(self, doc_uri: str, params: TextDocumentCodeActionTypedDict):
         func = partial(self._threaded_code_action, doc_uri, params)
@@ -1064,26 +1222,49 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
     def _threaded_code_action(
         self, doc_uri: str, params: TextDocumentCodeActionTypedDict, monitor: IMonitor
-    ) -> Optional[List[CommandTypedDict]]:
-
-        from robotframework_ls.impl.code_action import code_action
-
+    ) -> Optional[List[CodeActionTypedDict]]:
         end = params["range"]["end"]
         line = end["line"]
         col = end["character"]
+
         completion_context = self._create_completion_context(
             doc_uri, line, col, monitor
         )
         if completion_context is None:
             return None
 
-        context = params["context"]
-        found_data: List[ICustomDiagnosticDataTypedDict] = []
-        for diagnostic in context["diagnostics"]:
-            data: Optional[ICustomDiagnosticDataTypedDict] = diagnostic.get("data")
-            if data is not None:
-                found_data.append(data)
-        return code_action(completion_context, found_data)
+        context: TextDocumentContextTypedDict = params["context"]
+
+        s: Optional[List[str]] = context.get("only")
+        only: Set[str]
+        if not s:
+            only = set()
+        else:
+            if isinstance(s, str):
+                only = set([s])
+            else:
+                only = set(s)
+
+        r: RangeTypedDict = params["range"]
+        select_range = Range.create_from_range_typed_dict(r)
+
+        line_contents = completion_context.doc.get_line(line)
+
+        start_pos: Position = select_range.start
+        end_pos: Position = select_range.end
+        start_pos.character = code_units.convert_utf16_code_unit_to_python(
+            line_contents, start_pos.character
+        )
+        end_pos.character = code_units.convert_utf16_code_unit_to_python(
+            line_contents, end_pos.character
+        )
+
+        from robotframework_ls.impl.code_action import code_action_all
+
+        return convert_code_action_pos_to_client_inplace(
+            completion_context.workspace,
+            code_action_all(completion_context, select_range, only, context),
+        )
 
     def m_references(
         self, doc_uri: str, line: int, col: int, include_declaration: bool
@@ -1105,7 +1286,11 @@ class RobotFrameworkServerApi(PythonLanguageServer):
         if completion_context is None:
             return None
 
-        return references(completion_context, include_declaration=include_declaration)
+        return convert_references_pos_to_client_inplace(
+            completion_context.workspace,
+            completion_context.doc,
+            references(completion_context, include_declaration=include_declaration),
+        )
 
     def m_workspace_symbols(self, query: Optional[str] = None):
         func = partial(self._threaded_workspace_symbols, query)
@@ -1274,7 +1459,7 @@ class RobotFrameworkServerApi(PythonLanguageServer):
 
             prefix_doc = RobotDocument("")
             prefix_doc.source = prefix
-            last_line, last_col = prefix_doc.get_last_line_col()
+            last_line, _last_col = prefix_doc.get_last_line_col()
 
             # Now we have the data from the full code, but we need to remove whatever
             # we have in the prefix from the result...

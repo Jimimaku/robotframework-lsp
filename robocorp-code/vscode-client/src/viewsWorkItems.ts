@@ -3,12 +3,19 @@ import { resolve, join, dirname, basename } from "path";
 
 import { logError } from "./channel";
 import { ROBOCORP_LIST_WORK_ITEMS_INTERNAL, ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL } from "./robocorpCommands";
-import { FSEntry, getSelectedRobot, RobotEntry, treeViewIdToTreeDataProvider } from "./viewsCommon";
-import { TREE_VIEW_ROBOCORP_RESOURCES_TREE } from "./robocorpViews";
+import {
+    FSEntry,
+    getSelectedRobot,
+    NO_PACKAGE_FOUND_MSG,
+    RobotEntry,
+    treeViewIdToTreeDataProvider,
+} from "./viewsCommon";
+import { TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE } from "./robocorpViews";
 import { getCurrRobotDir, RobotSelectionTreeDataProviderBase } from "./viewsRobotSelectionTreeBase";
 import { resolveInterpreter } from "./activities";
 import { feedback } from "./rcc";
 import { ResourcesTreeDataProvider } from "./viewsResources";
+import { WorkItem, WorkItemsInfo, ActionResultWorkItems, InterpreterInfo, LibraryVersionInfoDict } from "./protocols";
 
 const WORK_ITEM_TEMPLATE = `[
   {
@@ -37,7 +44,7 @@ export interface WorkItemFSEntry extends FSEntry {
 
 async function getWorkItemInfo(): Promise<WorkItemsInfo | null> {
     const resourcesTreeDataProvider: ResourcesTreeDataProvider = <ResourcesTreeDataProvider>(
-        treeViewIdToTreeDataProvider.get(TREE_VIEW_ROBOCORP_RESOURCES_TREE)
+        treeViewIdToTreeDataProvider.get(TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE)
     );
     const workItemsTreeDataProvider = resourcesTreeDataProvider.workItemsTreeDataProvider;
 
@@ -228,7 +235,7 @@ export class WorkItemsTreeDataProvider extends RobotSelectionTreeDataProviderBas
             this.lastRobotEntry = undefined;
             return [
                 {
-                    name: "<Waiting for Robot Selection...>",
+                    name: NO_PACKAGE_FOUND_MSG,
                     isDirectory: false,
                     filePath: undefined,
                     kind: undefined,
@@ -327,8 +334,10 @@ export class WorkItemsTreeDataProvider extends RobotSelectionTreeDataProviderBas
                 ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL,
                 {
                     "conda_prefix": condaPrefix,
-                    "library": "rpaframework",
-                    "version": "11.3",
+                    "libs_and_version": [
+                        ["rpaframework", "11.3"],
+                        ["robocorp-workitems", "0.0.1"], // Any version will do
+                    ],
                 }
             );
 

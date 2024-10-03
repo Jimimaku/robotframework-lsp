@@ -12,7 +12,7 @@ publishPlugin {
 }
 
 group 'robotframework.intellij'
-version '1.5.0'
+version '1.13.0'
 
 task finishBuild(type: Exec) {
     def finishArgs = ['python', "finish_build.py"]
@@ -50,23 +50,32 @@ intellij {
 patchPluginXml {
     changeNotes = """
     <p>
-    <strong>Release 1.5.0</strong>
+    <strong>Release 1.12.0</strong>
     </p>
     
     <ul>
-    <li><strong>Bugfixes</strong></li>
+    
+    <h3 id="new-features">New features</h3>
     <ul>
-    <li>Fixed caching issue where adding a file would not invalidate an internal cache which could make resolved imports appear as unresolved.</li>
+    <li>It's now possible to use a python variable file (with <code>robot.loadVariablesFromVariablesFile</code> setting) for linting.</li>
+    <li>Added option (<code>robot.testView.enabled</code>) to disable test view.</li>
+    <li>Updated versions in dependencies to fix CVEs.</li>
     </ul>
-    
-    
+    <h3 id="bugfixes">Bugfixes</h3>
+    <ul>
+    <li>Fixed issue with GitLens.</li>
+    <li>Fix issue with RF (the EXCEPT target is now in an ASSIGN token instead of VARIABLE).</li>
+    <li>Fix issue with RF (the FOR target is now in an ASSIGN token instead of VARIABLE).</li>
+    </ul>
+
+
+    <br/>
     
     <strong>
     See changelog for all versions at:<br>
     <br>
     <a href="https://github.com/robocorp/robotframework-lsp/blob/master/robotframework-intellij/docs/changelog.md">Changelog at GitHub</a>.
     </strong>
-
 
     <br>
     <strong>Current feature set:</strong><br>
@@ -109,7 +118,7 @@ patchPluginXml {
     // See https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html?from=jetbrains.org#intellij-platform-based-products-of-recent-ide-versions
 
     sinceBuild = '203'
-    untilBuild = '223.*'
+    untilBuild = '290.*'
 }
 
 test {

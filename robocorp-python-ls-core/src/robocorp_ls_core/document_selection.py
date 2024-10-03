@@ -4,8 +4,14 @@ import re
 from robocorp_ls_core.protocols import IDocumentSelection, IDocument
 
 
-RE_START_WORD = re.compile("[\w]*$")
-RE_END_WORD = re.compile("^[\w]*")
+RE_START_WORD = re.compile(r"[\w]*$")
+RE_END_WORD = re.compile(r"^[\w]*")
+
+
+def word_to_column(line_to_cursor):
+    m_start = RE_START_WORD.findall(line_to_cursor)
+
+    return m_start[0]
 
 
 class DocumentSelection(object):
@@ -72,10 +78,7 @@ class DocumentSelection(object):
     @property
     def word_to_column(self) -> str:
         line_to_cursor = self.line_to_column
-
-        m_start = RE_START_WORD.findall(line_to_cursor)
-
-        return m_start[0]
+        return word_to_column(line_to_cursor)
 
     @property
     def word_from_column(self) -> str:

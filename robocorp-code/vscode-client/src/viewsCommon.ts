@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { LocalRobotMetadataInfo, Range } from "./protocols";
 import { getLocatorSingleTreeSelection } from "./viewsResources";
 
 /**
@@ -10,20 +11,31 @@ export interface LocatorEntry {
     column: number;
     type: string; // "browser", "image", "coordinate", "error", "info",...
     filePath: string;
+    tooltip: string | undefined;
 }
 
+export const NO_PACKAGE_FOUND_MSG = "No package found in current folder";
+
 export enum RobotEntryType {
+    ActionPackage,
+    Action,
+    ActionsInActionPackage,
     Robot,
     Task,
     Error,
     Run,
     Debug,
+    RunAction,
+    DebugAction,
     ActionsInRobot,
     OpenFlowExplorer,
     UploadRobot,
     RobotTerminal,
     OpenRobotYaml,
     OpenRobotCondaYaml,
+    OpenPackageYaml,
+    StartActionServer,
+    PackageRebuildEnvironment,
 }
 
 export interface CloudEntry {
@@ -32,16 +44,26 @@ export interface CloudEntry {
     command?: vscode.Command;
     children?: CloudEntry[];
     viewItemContextValue?: string;
+    tooltip?: string;
 }
 
 export interface RobotEntry {
     label: string;
     uri: vscode.Uri | undefined;
     robot: LocalRobotMetadataInfo | undefined;
-    taskName?: string;
     iconPath: string;
     type: RobotEntryType;
     parent: RobotEntry | undefined;
+    collapsed?: boolean | undefined;
+    tooltip?: string | undefined;
+
+    // For task
+    taskName?: string;
+
+    // For action
+    action_package_uri?: vscode.Uri | undefined;
+    actionName?: string;
+    range?: Range;
 }
 
 export interface FSEntry {

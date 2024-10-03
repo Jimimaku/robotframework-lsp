@@ -1,10 +1,9 @@
-__version__ = "0.39.0"
-from typing import Union, List
-
-version_info: List[int] = [int(x) for x in __version__.split(".")]
-
 import os.path
 import sys
+from typing import List
+
+__version__ = "1.22.3"
+version_info: List[int] = [int(x) for x in __version__.split(".")]
 
 __file__ = os.path.abspath(__file__)
 if __file__.endswith((".pyc", ".pyo")):
@@ -55,9 +54,9 @@ def import_robocorp_ls_core() -> None:
                     "Using vendored mode. Found: %s" % (vendored_folder,)
                 )
                 use_folder = vendored_folder
-                assert os.path.isdir(
-                    use_folder
-                ), "Expected: %s to exist and be a directory." % (use_folder,)
+                assert os.path.isdir(use_folder), (
+                    "Expected: %s to exist and be a directory." % (use_folder,)
+                )
 
             sys.path.append(use_folder)
             import robocorp_ls_core

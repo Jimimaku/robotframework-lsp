@@ -1,21 +1,28 @@
-from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
-import weakref
-from robocorp_ls_core.protocols import IConfigProvider
-import os.path
 import io
+import os.path
+import sys
+import weakref
+
+import pytest
+from robocorp_ls_core.protocols import IConfigProvider
+from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
 
 
 def test_resolve_interpreter_relocate_robot_root(
     config_provider: IConfigProvider, rcc_conda_installed, datadir
 ) -> None:
-    from robocorp_code.plugins.resolve_interpreter import RobocorpResolveInterpreter
-    from robocorp_ls_core.pluginmanager import PluginManager
-    from robocorp_ls_core.ep_providers import EPConfigurationProvider
-    from robocorp_ls_core.ep_providers import EPEndPointProvider
-    from robocorp_ls_core.constants import NULL
-    from robocorp_ls_core import uris
     from pathlib import Path
+
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.constants import NULL
+    from robocorp_ls_core.ep_providers import (
+        EPConfigurationProvider,
+        EPEndPointProvider,
+    )
+    from robocorp_ls_core.pluginmanager import PluginManager
     from robocorp_ls_core.robotframework_log import configure_logger
+
+    from robocorp_code.plugins.resolve_interpreter import RobocorpResolveInterpreter
 
     pm = PluginManager()
     pm.set_instance(EPConfigurationProvider, config_provider)
@@ -66,9 +73,52 @@ def test_resolve_interpreter_relocate_robot_root(
     assert Path(interpreter_info2.get_interpreter_id()) == path2
 
 
-def test_fix_entry():
-    from robocorp_code.plugins.resolve_interpreter import RobocorpResolveInterpreter
+def test_resolve_interpreter_environment_config(
+    config_provider: IConfigProvider, rcc_conda_installed, datadir
+) -> None:
+    import subprocess
     import sys
+
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.constants import NULL
+    from robocorp_ls_core.ep_providers import (
+        EPConfigurationProvider,
+        EPEndPointProvider,
+    )
+    from robocorp_ls_core.pluginmanager import PluginManager
+
+    from robocorp_code.plugins.resolve_interpreter import RobocorpResolveInterpreter
+
+    pm = PluginManager()
+    pm.set_instance(EPConfigurationProvider, config_provider)
+    pm.set_instance(EPEndPointProvider, NULL)
+
+    resolve_interpreter = RobocorpResolveInterpreter(weak_pm=weakref.ref(pm))
+
+    path1 = datadir / "robot_envconfig" / "robot.yaml"
+
+    interpreter_info1 = resolve_interpreter.get_interpreter_info_for_doc_uri(
+        uris.from_fs_path(str(path1))
+    )
+    assert interpreter_info1
+    python_exe = interpreter_info1.get_python_exe()
+    output = subprocess.check_output(
+        [python_exe, "-c", "import sys;print(sys.version_info[:2])"]
+    ).decode("utf-8")
+    if sys.platform == "win32":
+        assert "(3, 9)" in output
+
+    elif sys.platform == "darwin":
+        assert "(3, 10)" in output
+
+    else:
+        assert "(3, 11)" in output
+
+
+def test_fix_entry():
+    import sys
+
+    from robocorp_code.plugins.resolve_interpreter import RobocorpResolveInterpreter
 
     fix_entry = RobocorpResolveInterpreter._fix_entry
     fix_path = RobocorpResolveInterpreter._fix_path
@@ -111,24 +161,75 @@ def test_fix_entry():
         )
 
 
+def test_resolve_interpreter_action_package(
+    cases: CasesFixture,
+    config_provider: IConfigProvider,
+    rcc_conda_installed,
+    rcc_patch,
+) -> None:
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.constants import NULL
+    from robocorp_ls_core.ep_providers import (
+        EPConfigurationProvider,
+        EPEndPointProvider,
+    )
+    from robocorp_ls_core.pluginmanager import PluginManager
+
+    from robocorp_code.plugins.resolve_interpreter import (
+        RobocorpResolveInterpreter,
+        _cache_package,
+        _CacheInfo,
+    )
+
+    _CacheInfo.clear_cache()
+    _cache_package.clear()
+
+    pm = PluginManager()
+    pm.set_instance(EPConfigurationProvider, config_provider)
+    pm.set_instance(EPEndPointProvider, NULL)
+
+    resolve_interpreter = RobocorpResolveInterpreter(weak_pm=weakref.ref(pm))
+    path = cases.get_path("action_package")
+    rcc_patch.apply()
+    interpreter_info = resolve_interpreter.get_interpreter_info_for_doc_uri(
+        uris.from_fs_path(path)
+    )
+    assert interpreter_info is not None
+    assert _cache_package._hits == 0
+
+    interpreter_info2 = resolve_interpreter.get_interpreter_info_for_doc_uri(
+        uris.from_fs_path(path)
+    )
+    assert interpreter_info is interpreter_info2
+    assert _cache_package._hits == 1
+
+
 def test_resolve_interpreter(
     cases: CasesFixture,
     config_provider: IConfigProvider,
     rcc_conda_installed,
     rcc_patch,
 ) -> None:
-    from robocorp_ls_core.constants import NULL
-    from robocorp_code.plugins.resolve_interpreter import RobocorpResolveInterpreter
-    from robocorp_ls_core import uris
-    from robocorp_ls_core.pluginmanager import PluginManager
-    from pathlib import Path
-    from robocorp_code.plugins.resolve_interpreter import _CacheInfo
-    from robocorp_ls_core.ep_providers import EPConfigurationProvider
-    from robocorp_ls_core.ep_providers import EPEndPointProvider
-    from robocorp_code.holetree_manager import HolotreeManager
     import time
+    from pathlib import Path
 
-    _CacheInfo._cache_hit_files = 0
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.constants import NULL
+    from robocorp_ls_core.ep_providers import (
+        EPConfigurationProvider,
+        EPEndPointProvider,
+    )
+    from robocorp_ls_core.pluginmanager import PluginManager
+
+    from robocorp_code.holetree_manager import HolotreeManager
+    from robocorp_code.plugins.resolve_interpreter import (
+        RobocorpResolveInterpreter,
+        _cache_package,
+        _CacheInfo,
+    )
+
+    _CacheInfo.clear_cache()
+    _cache_package.clear()
 
     pm = PluginManager()
     pm.set_instance(EPConfigurationProvider, config_provider)
@@ -210,3 +311,59 @@ def test_resolve_interpreter(
 
     stat2 = recycle_file.stat()
     assert stat.st_mtime < stat2.st_mtime
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Expectations require windows.")
+def test_match_conda_config_path(datadir):
+    from pathlib import Path
+
+    from robocorp_code.plugins.resolve_interpreter import get_conda_config_path
+
+    robot_yaml = Path(datadir / "robot_envconfig" / "robot.yaml")
+    parent = robot_yaml.parent
+
+    assert (
+        get_conda_config_path(
+            parent, robot_yaml, {"condaConfigFile": "conda.yaml"}
+        ).name
+        == "conda.yaml"
+    )
+
+    assert (
+        get_conda_config_path(
+            parent,
+            robot_yaml,
+            {
+                "condaConfigFile": "conda.yaml",
+                "environmentConfigs": ["conda2.yaml"],
+            },
+        ).name
+        == "conda2.yaml"
+    )
+
+    assert (
+        get_conda_config_path(
+            parent,
+            robot_yaml,
+            {
+                "condaConfigFile": "conda.yaml",
+                "environmentConfigs": ["conda2_linux.yaml", "conda2.yaml"],
+            },
+        ).name
+        == "conda2.yaml"
+    )
+
+    assert (
+        get_conda_config_path(
+            parent,
+            robot_yaml,
+            {
+                "condaConfigFile": "conda.yaml",
+                "environmentConfigs": [
+                    "conda.yaml",
+                    "environment_windows_amd64_freeze.yaml",
+                ],
+            },
+        ).name
+        == "conda.yaml"
+    )

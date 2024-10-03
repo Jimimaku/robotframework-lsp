@@ -1,0 +1,69 @@
+name: Tests - Python Language Server Core (robocorp-python-ls-core)
+
+on:
+  push:
+    paths:
+    - robocorp-python-ls-core/**
+    - .github/**
+
+
+  pull_request:
+    paths:
+    - robocorp-python-ls-core/**
+    - .github/**
+    
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [
+          "windows-py311",
+          "ubuntu-py39",
+          "macos-py38"
+        ]
+        
+        include:
+          - name: "windows-py311"
+            python: "3.11"
+            os: windows-latest
+          - name: "ubuntu-py39"
+            python: "3.9"
+            os: ubuntu-latest
+          - name: "macos-py38"
+            python: "3.8"
+            os: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python }}
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
+    - name: setup.py install
+      working-directory: ./robocorp-python-ls-core
+      run: |
+        cd src
+        python setup.py install
+        cd ..
+    - name: Install test deps
+      working-directory: ./robocorp-python-ls-core
+      run: |
+        cd tests
+        pip install -r test_requirements.txt
+        cd ..
+    - name: Test
+      working-directory: ./robocorp-python-ls-core/tests
+      env:
+        PYTHONPATH: .
+      run: python -u ./run_tests.py -rfE -otests_output -vv .
+    - uses: actions/upload-artifact@v4
+      with:
+        name: tests_output.${{ matrix.name }}.txt
+        path: robocorp-python-ls-core/tests/tests_output
+

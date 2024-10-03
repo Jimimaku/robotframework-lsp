@@ -365,3 +365,34 @@ the proper amount of spacing (or tabs).
 In VSCode this requires setting `"robot.editor.4spacesTab"` to `false` besides
 adjusting other editor-related settings.
 
+
+How to disable `onEnterRules`
+------------------------------------
+
+By default the `Robot Framework Language Server` will customize the new
+line behavior so that:
+
+- `#` is added when the user presses enter in the middle of any line and such line starts with a `#`.
+- `...` is added if the user presses enter in the middle of any line.
+
+If you'd like to disable this support it's possible to put:
+
+```json
+    "[robotframework]": {
+        "editor.autoIndent": "brackets"
+    },
+```
+
+In your `settings.json`.
+
+
+How to install a pre-release
+------------------------------------
+
+To install a pre-release, select the extension you want 
+in the extensions view and click `Switch to Pre-Release version`.
+
+See image below:
+
+![Install pre-release](./images/install_pre_release.png)
+

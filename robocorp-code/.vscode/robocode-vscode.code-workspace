@@ -13,7 +13,9 @@
             "path": "../../robotframework-interactive"
         },
         {
-            "path": "../../robot-stream"
+            // In dev mode we expect robotframework-output-stream to be cloned
+            // in the same dir where robotframework-lsp is cloned.
+            "path": "../../../robotframework-output-stream"
         },
         {
             "path": "../../example-vscode"
@@ -51,6 +53,9 @@
             "editor.defaultFormatter": "esbenp.prettier-vscode"
         },
         "[typescriptreact]": {
+            "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[html]": {
             "editor.defaultFormatter": "esbenp.prettier-vscode"
         },
         "python.terminal.activateEnvironment": false

@@ -1,47 +1,55 @@
-from functools import partial
 import os
 import sys
-from pathlib import Path
-from typing import List, Any, Optional, Dict, Iterator
+import time
+import weakref
 from base64 import b64encode
+from functools import partial
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
-from robocorp_code import commands
-from robocorp_code.protocols import (
-    IRccWorkspace,
-    IRccRobotMetadata,
-    LocalRobotMetadataInfoDict,
-    WorkspaceInfoDict,
-    PackageInfoDict,
-    ActionResultDict,
-    UploadRobotParamsDict,
-    UploadNewRobotParamsDict,
-    CreateRobotParamsDict,
-    CloudListWorkspaceDict,
-    CloudLoginParamsDict,
-    ListWorkspacesActionResultDict,
-    PackageInfoInLRUDict,
-    RunInRccParamsDict,
-    ActionResultDictLocalRobotMetadata,
-    ActionResultDictRobotLaunch,
-    TypedDict,
-    ActionResultDictLocatorsJson,
-    ActionResultDictLocatorsJsonInfo,
-    LocatorEntryInfoDict,
-    ConfigurationDiagnosticsDict,
-    ActionResultDictWorkItems,
-    ListWorkItemsParams,
-    WorkItem,
-)
+from robocorp_ls_core import uris, watchdog_wrapper
 from robocorp_ls_core.basic import overrides
 from robocorp_ls_core.cache import CachedFileInfo
-from robocorp_ls_core.protocols import IConfig, LibraryVersionInfoDict
-from robocorp_ls_core.python_ls import PythonLanguageServer
+from robocorp_ls_core.command_dispatcher import _CommandDispatcher
+from robocorp_ls_core.jsonrpc.endpoint import require_monitor
+from robocorp_ls_core.lsp import HoverTypedDict
+from robocorp_ls_core.protocols import IConfig, IMonitor, LibraryVersionInfoDict
+from robocorp_ls_core.python_ls import BaseLintManager, PythonLanguageServer
 from robocorp_ls_core.robotframework_log import get_logger
 from robocorp_ls_core.watchdog_wrapper import IFSObserver
-from robocorp_ls_core import watchdog_wrapper
-import time
-from robocorp_ls_core.command_dispatcher import _CommandDispatcher
-import weakref
+
+from robocorp_code import commands
+from robocorp_code.inspector.inspector_language_server import InspectorLanguageServer
+from robocorp_code.protocols import (
+    ActionResultDict,
+    ActionResultDictLocalRobotMetadata,
+    ActionResultDictLocatorsJson,
+    ActionResultDictLocatorsJsonInfo,
+    ActionResultDictRobotLaunch,
+    ActionResultDictWorkItems,
+    CloudListWorkspaceDict,
+    ConfigurationDiagnosticsDict,
+    CreateRobotParamsDict,
+    IRccRobotMetadata,
+    IRccWorkspace,
+    ListActionsParams,
+    ListWorkItemsParams,
+    ListWorkspacesActionResultDict,
+    LocalRobotMetadataInfoDict,
+    LocatorEntryInfoDict,
+    PackageInfoDict,
+    PackageInfoInLRUDict,
+    RunInRccParamsDict,
+    TypedDict,
+    UploadNewRobotParamsDict,
+    UploadRobotParamsDict,
+    WorkItem,
+    WorkspaceInfoDict,
+)
+from robocorp_code.vendored_deps.package_deps._deps_protocols import (
+    ICondaCloud,
+    IPyPiCloud,
+)
 
 log = get_logger(__name__)
 
@@ -59,7 +67,7 @@ def _parse_version(version) -> tuple:
     for v in version.split("."):
         try:
             ret.append(int(v))
-        except:
+        except Exception:
             ret.append(v)
     return tuple(ret)
 
@@ -77,26 +85,34 @@ class ListWorkspaceCachedInfoDict(TypedDict):
 command_dispatcher = _CommandDispatcher()
 
 
-class RobocorpLanguageServer(PythonLanguageServer):
+class RobocorpLanguageServer(PythonLanguageServer, InspectorLanguageServer):
     # V2: save the account info along to validate user.
     # V3: Add organizationName
     CLOUD_LIST_WORKSPACE_CACHE_KEY = "CLOUD_LIST_WORKSPACE_CACHE_V3"
     PACKAGE_ACCESS_LRU_CACHE_KEY = "PACKAGE_ACCESS_LRU_CACHE"
 
-    def __init__(self, read_stream, write_stream):
-        from robocorp_code.rcc import Rcc
-        from robocorp_ls_core.cache import DirCache
-        from robocorp_ls_core.pluginmanager import PluginManager
-        from robocorp_ls_core.ep_providers import DefaultConfigurationProvider
-        from robocorp_ls_core.ep_providers import EPConfigurationProvider
-        from robocorp_ls_core.ep_providers import DefaultDirCacheProvider
-        from robocorp_ls_core.ep_providers import EPDirCacheProvider
-        from robocorp_ls_core.ep_providers import DefaultEndPointProvider
-        from robocorp_ls_core.ep_providers import EPEndPointProvider
+    def __init__(self, read_stream, write_stream) -> None:
         from queue import Queue
-        from robocorp_code._language_server_vault import _Vault
-        from robocorp_code._language_server_login import _Login
+
+        from robocorp_ls_core.cache import DirCache
+        from robocorp_ls_core.ep_providers import (
+            DefaultConfigurationProvider,
+            DefaultDirCacheProvider,
+            DefaultEndPointProvider,
+            EPConfigurationProvider,
+            EPDirCacheProvider,
+            EPEndPointProvider,
+        )
+        from robocorp_ls_core.pluginmanager import PluginManager
+
         from robocorp_code._language_server_feedback import _Feedback
+        from robocorp_code._language_server_login import _Login
+        from robocorp_code._language_server_playwright import _Playwright
+        from robocorp_code._language_server_pre_run_scripts import _PreRunScripts
+        from robocorp_code._language_server_profile import _Profile
+        from robocorp_code._language_server_vault import _Vault
+        from robocorp_code.rcc import Rcc
+        from robocorp_code.vendored_deps.package_deps.pypi_cloud import PyPiCloud
 
         user_home = os.getenv("ROBOCORP_CODE_USER_HOME", None)
         if user_home is None:
@@ -107,7 +123,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
 
         try:
             import ssl
-        except:
+        except Exception:
             # This means that we won't be able to download drivers to
             # enable the creation of browser locators!
             # Let's print a bit more info.
@@ -136,11 +152,19 @@ class RobocorpLanguageServer(PythonLanguageServer):
                 f"Env vars info: {env_vars_info}\n"
             )
 
-        self._fs_observer = None
+        try:
+            import truststore
+
+            truststore.inject_into_ssl()
+        except Exception:
+            log.exception("There was an error injecting trustore into ssl.")
+
+        self._fs_observer: Optional[IFSObserver] = None
 
         self._dir_cache = DirCache(cache_dir)
         self._rcc = Rcc(self)
         self._feedback = _Feedback(self._rcc)
+        self._pre_run_scripts = _PreRunScripts(command_dispatcher)
         self._local_list_robots_cache: Dict[
             Path, CachedFileInfo[LocalRobotMetadataInfoDict]
         ] = {}
@@ -167,6 +191,13 @@ class RobocorpLanguageServer(PythonLanguageServer):
             clear_caches_on_login_change,
         )
 
+        self._profile = _Profile(
+            self._endpoint,
+            command_dispatcher,
+            self._rcc,
+            self._feedback,
+        )
+
         self._pm = PluginManager()
         self._config_provider = DefaultConfigurationProvider(self.config)
         self._pm.set_instance(EPConfigurationProvider, self._config_provider)
@@ -178,11 +209,50 @@ class RobocorpLanguageServer(PythonLanguageServer):
         )
         from robocorp_code.plugins.resolve_interpreter import register_plugins
 
-        self._prefix_to_last_run_number_and_time = {}
+        self._prefix_to_last_run_number_and_time: Dict[str, Tuple[int, float]] = {}
 
+        self._pypi_cloud = PyPiCloud(weakref.WeakMethod(self._get_pypi_base_urls))  # type: ignore
+        self._cache_dir = cache_dir
         self._paths_remover = None
-        self._paths_remover_queue = Queue()
+        self.__conda_cloud: Optional[ICondaCloud] = None
+        self._paths_remover_queue: "Queue[Path]" = Queue()
         register_plugins(self._pm)
+
+        self._playwright = _Playwright(
+            base_command_dispatcher=command_dispatcher,
+            feedback=self._feedback,
+            plugin_manager=self._pm,
+            lsp_messages=self._lsp_messages,
+        )
+
+        InspectorLanguageServer.__init__(self)
+
+    @property
+    def _conda_cloud(self) -> ICondaCloud:  # Create it on demand
+        if self.__conda_cloud is None:
+            conda_cloud = self.__conda_cloud = self._create_conda_cloud(self._cache_dir)
+            conda_cloud.schedule_update()
+        return self.__conda_cloud
+
+    def _create_conda_cloud(self, cache_dir: str) -> ICondaCloud:
+        """
+        Note: monkey-patched in tests (so that we don't reindex
+        and specify the conda-indexes to use).
+        """
+        from robocorp_code.vendored_deps.package_deps.conda_cloud import CondaCloud
+
+        return CondaCloud(Path(cache_dir) / ".conda_indexes")
+
+    def _get_pypi_base_urls(self) -> Sequence[str]:
+        return self._profile.get_pypi_base_urls()
+
+    @property
+    def pypi_cloud(self) -> IPyPiCloud:
+        return self._pypi_cloud
+
+    @property
+    def conda_cloud(self) -> ICondaCloud:
+        return self._conda_cloud
 
     def _discard_listed_workspaces_info(self):
         self._dir_cache.discard(self.CLOUD_LIST_WORKSPACE_CACHE_KEY)
@@ -234,76 +304,16 @@ class RobocorpLanguageServer(PythonLanguageServer):
             self._fs_observer = watchdog_wrapper.create_observer("dummy", ())
         return self._fs_observer
 
-    @overrides(PythonLanguageServer.cancel_lint)
-    def cancel_lint(self, doc_uri):
-        pass  # no-op (we don't cancel it if the file changes)
+    def _create_lint_manager(self) -> Optional[BaseLintManager]:
+        from robocorp_code._lint import LintManager
 
-    @overrides(PythonLanguageServer.lint)
-    def lint(self, doc_uri, is_saved, content_changes=None):
-        from robocorp_ls_core.lsp import DiagnosticSeverity
-        from robocorp_ls_core import uris
-        import json
-
-        if is_saved:
-            # When a document is saved, if it's a conda.yaml or a robot.yaml,
-            # validate it.
-            if doc_uri.endswith("conda.yaml") or doc_uri.endswith("robot.yaml"):
-                robot_yaml_fs_path = uris.to_fs_path(doc_uri)
-                if robot_yaml_fs_path.endswith("conda.yaml"):
-                    p = os.path.dirname(robot_yaml_fs_path)
-                    for _ in range(3):
-                        target = os.path.join(p, "robot.yaml")
-                        if target and os.path.exists(target):
-                            robot_yaml_fs_path = target
-                            break
-                    else:
-                        # We didn't find the 'robot.yaml' for the 'conda.yaml'
-                        # bail out.
-                        return
-
-                action_result = self._rcc.configuration_diagnostics(robot_yaml_fs_path)
-                if action_result.success:
-                    json_contents = action_result.result
-                    as_dict = json.loads(json_contents)
-                    checks = as_dict.get("checks", [])
-                    found = []
-                    if isinstance(checks, (list, tuple)):
-                        for check in checks:
-                            if isinstance(check, dict):
-                                status = check.get("status", "ok").lower()
-                                if status != "ok":
-
-                                    # Default is error (for fail/fatal)
-                                    severity = DiagnosticSeverity.Error
-
-                                    if status in ("warn", "warning"):
-                                        severity = DiagnosticSeverity.Warning
-                                    elif status in ("info", "information"):
-                                        severity = DiagnosticSeverity.Information
-
-                                    # The actual line is not given by rcc, so, put
-                                    # all errors in the first 2 lines.
-                                    message = check.get(
-                                        "message", "<unable to get error message>"
-                                    )
-
-                                    url = check.get("url")
-                                    if url:
-                                        message += (
-                                            f" -- see: {url} for more information."
-                                        )
-                                    found.append(
-                                        {
-                                            "range": {
-                                                "start": {"line": 0, "character": 0},
-                                                "end": {"line": 1, "character": 0},
-                                            },
-                                            "severity": severity,
-                                            "source": "robocorp-code",
-                                            "message": message,
-                                        }
-                                    )
-                    self._lsp_messages.publish_diagnostics(doc_uri, found)
+        return LintManager(
+            self,
+            self._rcc,
+            self._lsp_messages,
+            self._endpoint,
+            self._jsonrpc_stream_reader.get_read_queue(),
+        )
 
     @overrides(PythonLanguageServer._create_config)
     def _create_config(self) -> IConfig:
@@ -314,13 +324,14 @@ class RobocorpLanguageServer(PythonLanguageServer):
     @overrides(PythonLanguageServer.capabilities)
     def capabilities(self):
         from robocorp_ls_core.lsp import TextDocumentSyncKind
+
         from robocorp_code.commands import ALL_SERVER_COMMANDS
 
         server_capabilities = {
             "codeActionProvider": False,
-            # "codeLensProvider": {
-            #     "resolveProvider": False,  # We may need to make this configurable
-            # },
+            "codeLensProvider": {
+                "resolveProvider": False,
+            },
             # "completionProvider": {
             #     "resolveProvider": False  # We know everything ahead of time
             # },
@@ -372,7 +383,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
         lru_size = params["lru_size"]
         try:
             cache_lru_list = self._dir_cache.load(name, list)
-        except:
+        except Exception:
             cache_lru_list = []
 
         try:
@@ -381,7 +392,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
                 return {"success": True, "message": "", "result": entry}
 
             cache_lru_list.remove(entry)
-        except:
+        except Exception:
             pass  # If empty or if entry is not there, just proceed.
 
         if len(cache_lru_list) >= lru_size:
@@ -396,7 +407,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
         try:
             name = params["name"]
             cache_lru_list = self._dir_cache.load(name, list)
-        except:
+        except Exception:
             cache_lru_list = []
 
         return cache_lru_list
@@ -411,7 +422,6 @@ class RobocorpLanguageServer(PythonLanguageServer):
         DEFAULT_SORT_KEY = 10
         ws_id_and_pack_id_to_lru_index: Dict = {}
         for i, entry in enumerate(cache_lru_list):
-
             if i >= DEFAULT_SORT_KEY:
                 break
 
@@ -514,7 +524,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
                 return result.as_dict()
 
             workspaces = result.result
-            for ws in workspaces:
+            for ws in workspaces or []:
                 packages: List[PackageInfoDict] = []
 
                 activity_package: IRccRobotMetadata
@@ -529,7 +539,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
                     continue
 
                 workspace_activities = activities_result.result
-                for activity_package in workspace_activities:
+                for activity_package in workspace_activities or []:
                     key = (ws.workspace_id, activity_package.robot_id)
                     sort_key = "%05d%s" % (
                         ws_id_and_pack_id_to_lru_index.get(key, DEFAULT_SORT_KEY),
@@ -572,7 +582,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
         template = params["template"]
 
         name = params.get("name", "").strip()
-        force = params.get("force", False)
+        force: bool = bool(params.get("force", False))
         if name:
             # If the name is given we join it to the directory, otherwise
             # we use the directory directly.
@@ -598,7 +608,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
         the old cache to remove stale values... all that's valid is put in
         the new cache).
         """
-        robot_yaml = sub / "robot.yaml"
+        check_yamls = [sub / "robot.yaml", sub / "package.yaml"]
 
         cached_file_info: Optional[
             CachedFileInfo[LocalRobotMetadataInfoDict]
@@ -608,32 +618,33 @@ class RobocorpLanguageServer(PythonLanguageServer):
                 new_cache[sub] = cached_file_info
                 return cached_file_info.value
 
-        if robot_yaml.exists():
-            from robocorp_ls_core import yaml_wrapper
+        for yaml_file in check_yamls:
+            if yaml_file.exists():
+                from robocorp_ls_core import yaml_wrapper
 
-            try:
+                try:
 
-                def get_robot_metadata(robot_yaml: Path):
-                    name = robot_yaml.parent.name
-                    with robot_yaml.open("r", encoding="utf-8") as stream:
-                        yaml_contents = yaml_wrapper.load(stream)
-                        name = yaml_contents.get("name", name)
+                    def get_robot_metadata(robot_yaml: Path):
+                        name = robot_yaml.parent.name
+                        with robot_yaml.open("r", encoding="utf-8") as stream:
+                            yaml_contents = yaml_wrapper.load(stream)
+                            name = yaml_contents.get("name", name)
 
-                    robot_metadata: LocalRobotMetadataInfoDict = {
-                        "directory": str(sub),
-                        "filePath": str(robot_yaml),
-                        "name": name,
-                        "yamlContents": yaml_contents,
-                    }
-                    return robot_metadata
+                        robot_metadata: LocalRobotMetadataInfoDict = {
+                            "directory": str(sub),
+                            "filePath": str(robot_yaml),
+                            "name": name,
+                            "yamlContents": yaml_contents,
+                        }
+                        return robot_metadata
 
-                cached_file_info = new_cache[sub] = CachedFileInfo(
-                    robot_yaml, get_robot_metadata
-                )
-                return cached_file_info.value
+                    cached_file_info = new_cache[sub] = CachedFileInfo(
+                        yaml_file, get_robot_metadata
+                    )
+                    return cached_file_info.value
 
-            except:
-                log.exception(f"Unable to get load robot metadata for: {robot_yaml}")
+                except Exception:
+                    log.exception(f"Unable to get load metadata for: {yaml_file}")
 
         return None
 
@@ -646,6 +657,42 @@ class RobocorpLanguageServer(PythonLanguageServer):
             log.exception(f"Error running in RCC: {params}.")
             return dict(success=False, message=str(e), result=None)
         return ret.as_dict()
+
+    @command_dispatcher(commands.ROBOCORP_LIST_ACTIONS_INTERNAL)
+    def _local_list_actions_internal(self, params: Optional[ListActionsParams]):
+        # i.e.: should not block.
+        return partial(self._local_list_actions_internal_impl, params=params)
+
+    def _local_list_actions_internal_impl(
+        self, params: Optional[ListActionsParams]
+    ) -> ActionResultDict:
+        from robocorp_code.robo.collect_actions import iter_actions
+
+        # TODO: We should move this code somewhere else and have a cache of
+        # things so that when the user changes anything the client is notified
+        # about it.
+        if not params:
+            msg = f"Unable to collect actions because the target action package was not given."
+            return dict(success=False, message=msg, result=None)
+
+        action_package_uri = params["action_package"]
+        p = Path(uris.to_fs_path(action_package_uri))
+        if not p.exists():
+            msg = f"Unable to collect actions from: {p} because it does not exist."
+            return dict(success=False, message=msg, result=None)
+
+        if not p.is_dir():
+            p = p.parent
+
+        try:
+            actions = list(iter_actions(p))
+        except Exception as e:
+            log.exception("Error collecting actions.")
+            return dict(
+                success=False, message=f"Error collecting actions: {e}", result=None
+            )
+
+        return dict(success=True, message=None, result=actions)
 
     @command_dispatcher(commands.ROBOCORP_LIST_WORK_ITEMS_INTERNAL)
     def _local_list_work_items_internal(
@@ -692,7 +739,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
             stat = path.stat()
         except Exception:
             message = f"Expected {path} to exist."
-            log.exception("message")
+            log.exception(message)
             return dict(success=False, message=message, result=None)
 
         robot_yaml = self._find_robot_yaml_path_from_path(path, stat)
@@ -712,7 +759,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
         def sort_by_number_postfix(entry: WorkItem):
             try:
                 return int(entry["name"].rsplit("-", 1)[-1])
-            except:
+            except Exception:
                 # That's ok, item just doesn't match our expected format.
                 return 9999999
 
@@ -774,7 +821,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
             if name.startswith(output_prefix):
                 try:
                     run_number = int(name[len(output_prefix) :])
-                except:
+                except Exception:
                     pass  # Just ignore (it wouldn't clash anyways)
                 else:
                     if run_number > max_run:
@@ -807,7 +854,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
         import re
 
         # Find the amount of work items that match the output prefix
-        pattern = f"^{re.escape(output_prefix)}\d+$"
+        pattern = rf"^{re.escape(output_prefix)}\d+$"
         non_recyclable_output_work_items = []
         recyclable_output_work_items = []
 
@@ -827,22 +874,9 @@ class RobocorpLanguageServer(PythonLanguageServer):
         return recyclable_output_work_items + non_recyclable_output_work_items
 
     def _find_robot_yaml_path_from_path(self, path: Path, stat) -> Optional[Path]:
-        from stat import S_ISDIR
+        from robocorp_code import find_robot_yaml
 
-        if not S_ISDIR(stat.st_mode):
-            # If we have the stat it already exists, so, just checking if it's a dir/file.
-            if path.name == "robot.yaml":
-                return path
-            else:
-                path = path.parent
-
-        for _i in range(3):
-            robot_yaml = path / "robot.yaml"
-            if robot_yaml.is_file():
-                return robot_yaml
-            path = path.parent
-
-        return robot_yaml
+        return find_robot_yaml.find_robot_yaml_path_from_path(path, stat)
 
     @command_dispatcher(commands.ROBOCORP_LOCAL_LIST_ROBOTS_INTERNAL)
     def _local_list_robots(self, params=None) -> ActionResultDictLocalRobotMetadata:
@@ -876,6 +910,9 @@ class RobocorpLanguageServer(PythonLanguageServer):
             self._local_list_robots_cache = new_cache
 
         return dict(success=True, message=None, result=ret)
+
+    def m_list_robots(self) -> ActionResultDictLocalRobotMetadata:
+        return self._local_list_robots()
 
     def _validate_directory(self, directory) -> Optional[str]:
         if not os.path.exists(directory):
@@ -993,8 +1030,17 @@ class RobocorpLanguageServer(PythonLanguageServer):
 
         name: Optional[str] = params.get("name")
         request: Optional[str] = params.get("request")
+
+        # Task package related:
         task: Optional[str] = params.get("task")
         robot: Optional[str] = params.get("robot")
+
+        # Action package related:
+        package: Optional[str] = params.get("package")
+        action_name: Optional[str] = params.get("actionName")
+        uri: Optional[str] = params.get("uri")
+        json_input: Optional[str] = params.get("jsonInput")
+
         additional_pythonpath_entries: Optional[List[str]] = params.get(
             "additionalPythonpathEntries"
         )
@@ -1002,18 +1048,36 @@ class RobocorpLanguageServer(PythonLanguageServer):
         python_exe: Optional[str] = params.get("pythonExe")
 
         return compute_launch.compute_robot_launch_from_robocorp_code_launch(
-            name, request, task, robot, additional_pythonpath_entries, env, python_exe
+            name=name,
+            request=request,
+            task=task,
+            robot=robot,
+            additional_pythonpath_entries=additional_pythonpath_entries,
+            env=env,
+            python_exe=python_exe,
+            package=package,
+            action_name=action_name,
+            uri=uri,
+            json_input=json_input,
         )
+
+    @property
+    def pm(self):
+        return self._pm
 
     @command_dispatcher(commands.ROBOCORP_RESOLVE_INTERPRETER, dict)
     def _resolve_interpreter(self, params=None) -> ActionResultDict:
-        from robocorp_ls_core.ep_resolve_interpreter import EPResolveInterpreter
-        from robocorp_ls_core.ep_resolve_interpreter import IInterpreterInfo
+        from robocorp_ls_core.ep_resolve_interpreter import (
+            EPResolveInterpreter,
+            IInterpreterInfo,
+        )
 
         try:
-            from robocorp_ls_core import uris
-
             target_robot: str = params.get("target_robot")
+            if not target_robot:
+                msg = f"Error resolving interpreter: No 'target_robot' passed. Received: {params}"
+                log.critical(msg)
+                return {"success": False, "message": msg, "result": None}
 
             for ep in self._pm.get_implementations(EPResolveInterpreter):
                 interpreter_info: IInterpreterInfo = (
@@ -1034,17 +1098,17 @@ class RobocorpLanguageServer(PythonLanguageServer):
             return {"success": False, "message": str(e), "result": None}
 
         # i.e.: no error but we couldn't find an interpreter.
-        return {"success": True, "message": "", "result": None}
+        return {
+            "success": False,
+            "message": "Couldn't find an interpreter",
+            "result": None,
+        }
 
     @command_dispatcher(commands.ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL)
     def _verify_library_version(self, params: dict) -> LibraryVersionInfoDict:
         from robocorp_ls_core import yaml_wrapper
 
         conda_prefix = Path(params["conda_prefix"])
-        library = params["library"]
-        version = params["version"]
-        expected_version = _parse_version(version)
-
         if not conda_prefix.exists():
             return {
                 "success": False,
@@ -1063,10 +1127,13 @@ class RobocorpLanguageServer(PythonLanguageServer):
         try:
             with golden_ee.open("r", encoding="utf-8") as stream:
                 yaml_contents = yaml_wrapper.load(stream)
-        except:
+        except Exception:
             msg = f"Error loading: {golden_ee} as yaml."
             log.exception(msg)
             return {"success": False, "message": msg, "result": None}
+
+        libs_and_version = params["libs_and_version"]
+        lib_to_version = dict(libs_and_version)
 
         if not isinstance(yaml_contents, list):
             return {
@@ -1075,27 +1142,40 @@ class RobocorpLanguageServer(PythonLanguageServer):
                 "result": None,
             }
 
+        version_mismatch_error_msgs: List[str] = []
         for entry in yaml_contents:
             if isinstance(entry, dict):
                 name = entry.get("name")
-                found_version = entry.get("version")
-                if name == library and found_version:
-                    if _verify_version(_parse_version(found_version), expected_version):
-                        return {
-                            "success": True,
-                            "message": "",
-                            "result": {"library": name, "version": found_version},
-                        }
+                if not isinstance(name, str):
+                    continue
 
+                found_version = entry.get("version")
+                version = lib_to_version.get(name)
+                if version is None or found_version is None:
+                    continue
+
+                # Ok, this is one of the expected libraries.
+                expected_version = _parse_version(version)
+                if _verify_version(_parse_version(found_version), expected_version):
                     return {
-                        "success": False,
-                        "message": f"{name} {found_version} does not match minimum required version ({version}).",
+                        "success": True,
+                        "message": "",
                         "result": {"library": name, "version": found_version},
                     }
 
+                version_mismatch_error_msgs.append(
+                    f"{name} {found_version} does not match minimum required version ({version})."
+                )
+
+        if version_mismatch_error_msgs:
+            return {
+                "success": False,
+                "message": "\n".join(version_mismatch_error_msgs),
+                "result": None,
+            }
         return {
             "success": False,
-            "message": f"{library} not found in environment.",
+            "message": f"Libraries: {', '.join([str(x) for x in lib_to_version])} not found in environment.",
             "result": None,
         }
 
@@ -1113,7 +1193,16 @@ class RobocorpLanguageServer(PythonLanguageServer):
         self._feedback.metric(name, value)
         return {"success": True, "message": None, "result": None}
 
-    def m_text_document__hover(self, **kwargs):
+    def m_text_document__code_lens(self, **kwargs) -> Optional[partial]:
+        from robocorp_code.robo.launch_code_lens import compute_launch_robo_code_lens
+
+        doc_uri = kwargs["textDocument"]["uri"]
+
+        return compute_launch_robo_code_lens(
+            self._workspace, self._config_provider, doc_uri
+        )
+
+    def m_text_document__hover(self, **kwargs) -> Any:
         """
         When hovering over a png in base64 surrounded by double-quotes... something as:
         "iVBORw0KGgo...rest of png in base 64 contents..."
@@ -1121,22 +1210,75 @@ class RobocorpLanguageServer(PythonLanguageServer):
         i.e.: Provide the contents in markdown format to show the actual image from the
         locators.json.
         """
-        from robocorp_ls_core import uris
-        from robocorp_ls_core.protocols import IDocument
-        from robocorp_ls_core.protocols import IDocumentSelection
-        from robocorp_ls_core.lsp import Range
-        from robocorp_ls_core.lsp import MarkupKind
-        from robocorp_ls_core.lsp import MarkupContent
-
         doc_uri = kwargs["textDocument"]["uri"]
         # Note: 0-based
         line: int = kwargs["position"]["line"]
         col: int = kwargs["position"]["character"]
-        if not uris.to_fs_path(doc_uri).endswith("locators.json"):
+        fspath = uris.to_fs_path(doc_uri)
+
+        if fspath.endswith("locators.json"):
+            return require_monitor(
+                partial(self._hover_on_locators_json, doc_uri, line, col)
+            )
+        if fspath.endswith(("conda.yaml", "action-server.yaml")):
+            return require_monitor(
+                partial(self._hover_on_conda_yaml, doc_uri, line, col)
+            )
+        if fspath.endswith("package.yaml"):
+            return require_monitor(
+                partial(self._hover_on_package_yaml, doc_uri, line, col)
+            )
+        return None
+
+    def _hover_on_conda_yaml(
+        self, doc_uri, line, col, monitor: IMonitor
+    ) -> Optional[HoverTypedDict]:
+        from robocorp_ls_core.protocols import IDocument
+
+        from robocorp_code.hover import hover_on_conda_yaml
+
+        ws = self._workspace
+        if ws is None:
             return None
-        document: IDocument = self._workspace.get_document(
-            doc_uri, accept_from_file=True
+
+        doc: Optional[IDocument] = ws.get_document(doc_uri, accept_from_file=True)
+        if doc is None:
+            return None
+
+        return hover_on_conda_yaml(doc, line, col, self._pypi_cloud, self._conda_cloud)
+
+    def _hover_on_package_yaml(
+        self, doc_uri, line, col, monitor: IMonitor
+    ) -> Optional[HoverTypedDict]:
+        from robocorp_ls_core.protocols import IDocument
+
+        from robocorp_code.hover import hover_on_package_yaml
+
+        ws = self._workspace
+        if ws is None:
+            return None
+
+        doc: Optional[IDocument] = ws.get_document(doc_uri, accept_from_file=True)
+        if doc is None:
+            return None
+
+        return hover_on_package_yaml(
+            doc, line, col, self._pypi_cloud, self._conda_cloud
         )
+
+    def _hover_on_locators_json(
+        self, doc_uri, line, col, monitor: IMonitor
+    ) -> Optional[dict]:
+        from robocorp_ls_core.lsp import MarkupContent, MarkupKind, Range
+        from robocorp_ls_core.protocols import IDocument, IDocumentSelection
+
+        ws = self._workspace
+        if ws is None:
+            return None
+
+        document: Optional[IDocument] = ws.get_document(doc_uri, accept_from_file=True)
+        if document is None:
+            return None
         sel: IDocumentSelection = document.selection(line, col)
         current_line: str = sel.current_line
         i: int = current_line.find(
@@ -1197,7 +1339,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
 
     @staticmethod
     def _load_locators_db(robot_yaml_path) -> ActionResultDictLocatorsJson:
-        from RPA.core.locators.database import LocatorsDatabase
+        from .vendored.locators.database import LocatorsDatabase
 
         locators_json = Path(robot_yaml_path).parent / "locators.json"
         db = LocatorsDatabase(str(locators_json))
@@ -1208,7 +1350,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
                 if isinstance(error, tuple) and len(error) == 2:
                     try:
                         error = error[0] % error[1]
-                    except:
+                    except Exception:
                         error = str(error)
                 else:
                     error = str(error)
@@ -1217,9 +1359,9 @@ class RobocorpLanguageServer(PythonLanguageServer):
 
     @command_dispatcher(commands.ROBOCORP_GET_LOCATORS_JSON_INFO)
     def _get_locators_json_info(
-        self, params: dict = None
+        self, params: Optional[dict] = None
     ) -> ActionResultDictLocatorsJsonInfo:
-        from RPA.core.locators.containers import Locator
+        from .vendored.locators.containers import Locator
 
         if not params or "robotYaml" not in params:
             return {
@@ -1276,7 +1418,7 @@ class RobocorpLanguageServer(PythonLanguageServer):
 
     @command_dispatcher(commands.ROBOCORP_REMOVE_LOCATOR_FROM_JSON_INTERNAL)
     def _remove_locator_from_json_internal(
-        self, params: dict = None
+        self, params: Optional[dict] = None
     ) -> ActionResultDict:
         if not params or "robotYaml" not in params or "name" not in params:
             return {
@@ -1315,50 +1457,6 @@ class RobocorpLanguageServer(PythonLanguageServer):
 
         return {"success": True, "message": None, "result": None}
 
-    @command_dispatcher(commands.ROBOCORP_SAVE_CONVERTED_PROJECT_INTERNAL)
-    def _populate_folder_with_conversion_result(self, opts) -> ActionResultDict:
-        from robocorp_ls_core.uris import to_fs_path
-        from datetime import datetime
-
-        source_vendor = opts["projectSourceVendor"]
-        conversion_result = opts["conversionResult"]
-        destination_folder_uri = opts["destinationFolderURI"]
-        destination_folder = (
-            Path(to_fs_path(destination_folder_uri))
-            .joinpath(
-                Path(f"results_{str(source_vendor)}_{int(datetime.now().timestamp())}")
-            )
-            .as_posix()
-        )
-        log.info(
-            "Dispatched converter internal command with args:",
-            str(destination_folder),
-            str(conversion_result),
-        )
-        try:
-            if self._validate_directory(destination_folder) is not None:
-                Path(destination_folder).mkdir(parents=True, exist_ok=True)
-            for index, file in enumerate(conversion_result["files"]):
-                final_destination = os.path.join(
-                    destination_folder,
-                    file["filename"]
-                    if file["filename"]
-                    else f"converted_tasks{index}.robot",
-                )
-                log.debug("Writing file:", str(final_destination))
-                Path(final_destination).write_text(file["content"])
-            log.info("Output folder for conversion results:", destination_folder)
-        except Exception as e:
-            log.exception(
-                f"There was an error while populating conversion results: {e}"
-            )
-            return {
-                "result": destination_folder_uri,
-                "success": False,
-                "message": f"There was an error while populating conversion results: {e}",
-            }
-        return {
-            "result": destination_folder_uri,
-            "success": True,
-            "message": None,
-        }
+    def forward_msg(self, msg: dict) -> None:
+        method = msg["method"]
+        self._endpoint.notify(method, msg["params"])

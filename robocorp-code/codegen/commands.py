@@ -13,6 +13,7 @@ class Command(object):
         enablement=None,
         hide_from_command_palette=False,
         constant="",
+        when_clause=None,
     ):
         """
         :param add_to_package_json:
@@ -31,7 +32,15 @@ class Command(object):
         self.server_handled = server_handled
         self.icon = icon
         self.enablement = enablement
-        self.hide_from_command_palette = hide_from_command_palette
+
+        if hide_from_command_palette:
+            assert (
+                not when_clause
+            ), "hide_from_command_palette and when_clause may not be both specified."
+            when_clause = "false"
+
+        self.when_clause = when_clause
+
         if not constant:
             constant = convert_case_to_constant(name)
         self.constant = constant
@@ -60,27 +69,40 @@ COMMANDS = [
     # and the proceeds to ask for the server for the actual implementation.
     Command(
         "robocorp.createRobot",
-        "Create Robot",
+        "Create Task Package (Robot)",
         server_handled=False,
+        icon="$(add)",
+    ),
+    Command(
+        "robocorp.createActionPackage",
+        "Create Action Package",
+        server_handled=False,
+        icon="$(add)",
+    ),
+    Command(
+        "robocorp.createTaskOrActionPackage",
+        "Create Action Package",
+        server_handled=False,
+        hide_from_command_palette=True,
         icon="$(add)",
     ),
     # Internal commands for robocorp.createRobot.
     Command(
         "robocorp.listRobotTemplates.internal",
-        "Provides a list with the available robot templates",
+        "Provides a list with the available Task Package (Robot) templates",
         add_to_package_json=False,
         server_handled=True,
     ),
     Command(
         "robocorp.createRobot.internal",
-        "Actually calls rcc to create the robot",
+        "Actually calls rcc to create the Task Package (Robot)",
         add_to_package_json=False,
         server_handled=True,
     ),
     # Started from the client due to needing UI actions.
     Command(
         "robocorp.uploadRobotToCloud",
-        "Upload Robot to the Control Room",
+        "Upload Task Package (Robot) to Control Room",
         add_to_package_json=True,
         server_handled=False,
     ),
@@ -123,13 +145,13 @@ COMMANDS = [
     ),
     Command(
         "robocorp.uploadToNewRobot.internal",
-        "Uploads a Robot as a new Robot in the Control Room",
+        "Uploads a Task Package (Robot) as a new Task Package (Robot) in the Control Room",
         add_to_package_json=False,
         server_handled=True,
     ),
     Command(
         "robocorp.uploadToExistingRobot.internal",
-        "Uploads a Robot as an existing Robot in the Control Room",
+        "Uploads a Task Package (Robot) as an existing Task Package (Robot) in the Control Room",
         add_to_package_json=False,
         server_handled=True,
     ),
@@ -141,13 +163,25 @@ COMMANDS = [
     ),
     Command(
         "robocorp.runRobotRcc",
-        "Run Robot",
+        "Run Task Package (Robot)",
+        add_to_package_json=True,
+        server_handled=False,
+    ),
+    Command(
+        "robocorp.runActionFromActionPackage",
+        "Run Action (from Action Package)",
         add_to_package_json=True,
         server_handled=False,
     ),
     Command(
         "robocorp.debugRobotRcc",
-        "Debug Robot",
+        "Debug Task Package (Robot)",
+        add_to_package_json=True,
+        server_handled=False,
+    ),
+    Command(
+        "robocorp.debugActionFromActionPackage",
+        "Debug Action (from Action Package)",
         add_to_package_json=True,
         server_handled=False,
     ),
@@ -168,6 +202,54 @@ COMMANDS = [
         icon={"light": "images/light/debug.svg", "dark": "images/dark/debug.svg"},
     ),
     Command(
+        "robocorp.robotsViewActionRun",
+        "Launch Action",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon={"light": "images/light/run.svg", "dark": "images/dark/run.svg"},
+    ),
+    Command(
+        "robocorp.robotsViewActionDebug",
+        "Debug Action",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon={"light": "images/light/debug.svg", "dark": "images/dark/debug.svg"},
+    ),
+    Command(
+        "robocorp.robotsViewActionEditInput",
+        "Configure Action Input",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon="$(symbol-variable)",
+    ),
+    Command(
+        "robocorp.robotsViewActionOpen",
+        "Open Action",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon="$(go-to-file)",
+    ),
+    Command(
+        "robocorp.runRobocorpsPythonTask",
+        "Run Robocorp's Python Task",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon={"light": "images/light/run.svg", "dark": "images/dark/run.svg"},
+    ),
+    Command(
+        "robocorp.debugRobocorpsPythonTask",
+        "Debug Robocorp's Python Task",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon={"light": "images/light/debug.svg", "dark": "images/dark/debug.svg"},
+    ),
+    Command(
         "robocorp.saveInDiskLRU",
         "Saves some data in an LRU in the disk",
         add_to_package_json=False,
@@ -181,7 +263,7 @@ COMMANDS = [
     ),
     Command(
         "robocorp.computeRobotLaunchFromRobocorpCodeLaunch",
-        "Computes a robot launch debug configuration based on the robocorp code launch debug configuration",
+        "Computes a Task Package (Robot) launch debug configuration based on the robocorp code launch debug configuration",
         add_to_package_json=False,
         server_handled=True,
     ),
@@ -212,14 +294,14 @@ COMMANDS = [
     ),
     Command(
         "robocorp.refreshRobotsView",
-        "Refresh Robots view",
+        "Refresh Task Packages (Robots) view",
         add_to_package_json=True,
         server_handled=False,
         icon={"light": "images/light/refresh.svg", "dark": "images/dark/refresh.svg"},
     ),
     Command(
         "robocorp.refreshRobotContentView",
-        "Refresh Robot Content view",
+        "Refresh Task Package (Robot) Content view",
         add_to_package_json=True,
         server_handled=False,
         icon={"light": "images/light/refresh.svg", "dark": "images/dark/refresh.svg"},
@@ -304,14 +386,7 @@ COMMANDS = [
     # just use the one selected in the robots tree.
     Command(
         "robocorp.newRobocorpInspectorBrowser",
-        "Add Browser Locator",
-        add_to_package_json=True,
-        server_handled=False,
-        icon="$(add)",
-    ),
-    Command(
-        "robocorp.newRobocorpInspectorImage",
-        "Add Image Locator",
+        "Add Web Locator",
         add_to_package_json=True,
         server_handled=False,
         icon="$(add)",
@@ -324,11 +399,33 @@ COMMANDS = [
         icon="$(add)",
     ),
     Command(
-        "robocorp.newRobocorpInspectorWebRecorder",
-        "Record Browser actions as code (beta)",
+        "robocorp.newRobocorpInspectorImage",
+        "Add Image Locator",
         add_to_package_json=True,
         server_handled=False,
         icon="$(add)",
+    ),
+    Command(
+        "robocorp.newRobocorpInspectorJava",
+        "Add Java Locator",
+        add_to_package_json=True,
+        server_handled=False,
+        icon="$(add)",
+    ),
+    Command(
+        "robocorp.openPlaywrightRecorder",
+        "Open Playwright Recorder",
+        add_to_package_json=True,
+        server_handled=False,
+        icon={"light": "images/light/run.svg", "dark": "images/dark/run.svg"},
+    ),
+    Command(
+        "robocorp.openPlaywrightRecorder.internal",
+        "Open Playwright Recorder Internal",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+        icon={"light": "images/light/run.svg", "dark": "images/dark/run.svg"},
     ),
     Command(
         "robocorp.editRobocorpInspectorLocator",
@@ -348,7 +445,7 @@ COMMANDS = [
     ),
     Command(
         "robocorp.openRobotTreeSelection",
-        "Configure Robot (robot.yaml)",
+        "Configure Task Package (Robot) (robot.yaml)",
         add_to_package_json=True,
         server_handled=False,
         hide_from_command_palette=True,
@@ -357,6 +454,14 @@ COMMANDS = [
     Command(
         "robocorp.openRobotCondaTreeSelection",
         "Configure Dependencies (conda.yaml)",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=True,
+        icon="$(list-tree)",
+    ),
+    Command(
+        "robocorp.openPackageYamlTreeSelection",
+        "Configure Action Package (package.yaml)",
         add_to_package_json=True,
         server_handled=False,
         hide_from_command_palette=True,
@@ -396,7 +501,7 @@ COMMANDS = [
     ),
     Command(
         "robocorp.cloudUploadRobotTreeSelection",
-        "Upload Robot to Control Room",
+        "Upload Task Package (Robot) to Control Room",
         add_to_package_json=True,
         server_handled=False,
         hide_from_command_palette=True,
@@ -404,10 +509,10 @@ COMMANDS = [
     ),
     Command(
         "robocorp.rccTerminalCreateRobotTreeSelection",
-        "Open terminal with Robot environment",
+        "Open terminal with Package Python environment",
         add_to_package_json=True,
         server_handled=False,
-        hide_from_command_palette=True,
+        hide_from_command_palette=False,
         icon="$(terminal)",
         constant="ROBOCORP_CREATE_RCC_TERMINAL_TREE_SELECTION",
     ),
@@ -425,6 +530,24 @@ COMMANDS = [
     ),
     Command("robocorp.submitIssue", "Submit issue to Robocorp", server_handled=False),
     Command(
+        "robocorp.inspector.internal",
+        "Inspector Manager (internal)",
+        server_handled=False,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.inspector",
+        "Open Inspector",
+        server_handled=False,
+        hide_from_command_palette=False,
+    ),
+    Command(
+        "robocorp.inspector.duplicate",
+        "Create & manage locators",
+        server_handled=False,
+        hide_from_command_palette=False,
+    ),
+    Command(
         "robocorp.errorFeedback.internal",
         "Error feedback (internal)",
         server_handled=False,
@@ -438,30 +561,30 @@ COMMANDS = [
     ),
     Command(
         "robocorp.configuration.diagnostics.internal",
-        "Robot Configuration Diagnostics (internal)",
+        "Task Package (Robot) Configuration Diagnostics (internal)",
         server_handled=True,
         hide_from_command_palette=True,
     ),
     Command(
         "robocorp.configuration.diagnostics",
-        "Robot Configuration Diagnostics",
+        "Task Package (Robot) Configuration Diagnostics",
         server_handled=False,
     ),
     Command(
         "robocorp.rccTerminalNew",
-        "Terminal with Robot environment",
+        "Terminal with Task Package (Robot) environment",
         server_handled=False,
         icon="$(terminal)",
     ),
     Command(
         "robocorp.listWorkItems.internal",
-        "Lists the work items available for a Robot",
+        "Lists the work items available for a Task Package (Robot)",
         server_handled=True,
         hide_from_command_palette=True,
     ),
     Command(
         "robocorp.updateLaunchEnv",
-        "Updates the environment variables used for some launch (given a Robot)",
+        "Updates the environment variables used for some launch (given a Task Package (Robot))",
         server_handled=False,
         hide_from_command_palette=True,
     ),
@@ -511,29 +634,29 @@ COMMANDS = [
         server_handled=True,
     ),
     Command(
-        "robocorp.connectVault",
-        "Connect to online secrets vault",
+        "robocorp.connectWorkspace",
+        "Connect to Control Room Workspace (vault, storage, ...)",
         icon="$(lock)",
         add_to_package_json=True,
         server_handled=False,
     ),
     Command(
-        "robocorp.disconnectVault",
-        "Disconnect from online secrets vault",
+        "robocorp.disconnectWorkspace",
+        "Disconnect from Control Room Workspace",
         icon="$(unlock)",
         add_to_package_json=True,
         server_handled=False,
     ),
     Command(
         "robocorp.getConnectedVaultWorkspace.internal",
-        "Gets workspace id of the currently connected vault",
+        "Gets workspace id currently connected",
         add_to_package_json=True,
         server_handled=True,
         hide_from_command_palette=True,
     ),
     Command(
         "robocorp.setConnectedVaultWorkspace.internal",
-        "Sets the currently connected vault workspace",
+        "Sets the currently connected Control Room Workspace",
         add_to_package_json=True,
         server_handled=True,
         hide_from_command_palette=True,
@@ -574,17 +697,100 @@ COMMANDS = [
     ),
     Command(
         "robocorp.convertProject",
-        "Convert third party RPA file to Robocorp Robot",
+        "Conversion Accelerator from third party RPA to Robocorp Task Package (Robot)",
         add_to_package_json=True,
         server_handled=False,
         hide_from_command_palette=False,
     ),
     Command(
-        "robocorp.saveConvertedProject.internal",
-        "Save converted Robocorp Project",
+        "robocorp.profileImport",
+        "Import Profile",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=False,
+        icon="$(file-symlink-file)",
+    ),
+    Command(
+        "robocorp.profileImport.internal",
+        "Import Profile (internal)",
         add_to_package_json=True,
         server_handled=True,
         hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.profileSwitch",
+        "Switch Profile",
+        add_to_package_json=True,
+        server_handled=False,
+        hide_from_command_palette=False,
+        icon="$(git-pull-request)",
+    ),
+    Command(
+        "robocorp.profileSwitch.internal",
+        "Switch Profile",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.profileList.internal",
+        "List Profiles",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.hasPreRunScripts.internal",
+        "Has Pre Run Scripts",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.runPreRunScripts.internal",
+        "Run Pre Run Scripts",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.getPyPiBaseUrls.internal",
+        "Get PyPi base urls",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.startActionServer",
+        "Start Action Server",
+        add_to_package_json=True,
+        server_handled=False,
+    ),
+    Command(
+        "robocorp.downloadActionServer",
+        "Download Action Server",
+        add_to_package_json=True,
+        server_handled=False,
+    ),
+    Command(
+        "robocorp.startActionServer.internal",
+        "Start Action Server (internal)",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.listActions.internal",
+        "Lists the actions available in an action package given a root dir (internal)",
+        add_to_package_json=True,
+        server_handled=True,
+        hide_from_command_palette=True,
+    ),
+    Command(
+        "robocorp.packageEnvironmentRebuild",
+        "Rebuild Package Environment",
+        server_handled=False,
+        hide_from_command_palette=False,
     ),
 ]
 

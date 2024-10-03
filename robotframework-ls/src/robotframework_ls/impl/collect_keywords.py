@@ -21,7 +21,6 @@ log = get_logger(__name__)
 
 
 class _KeywordFoundFromAst(object):
-
     __slots__ = [
         "_module_ast",
         "_keyword_node",
@@ -155,8 +154,8 @@ class _KeywordFoundFromAst(object):
 
 
 class _KeywordFoundFromLibrary(object):
-
     __slots__ = [
+        "_lib_deprecated",
         "_library_doc",
         "_library_alias",
         "_keyword_doc",
@@ -169,6 +168,7 @@ class _KeywordFoundFromLibrary(object):
 
     def __init__(
         self,
+        lib_deprecated,
         library_doc,
         keyword_doc,
         keyword_name,
@@ -177,7 +177,7 @@ class _KeywordFoundFromLibrary(object):
         completion_item_kind,
         library_alias=None,
     ):
-
+        self._lib_deprecated = lib_deprecated
         self._library_doc = library_doc
         self._keyword_doc = keyword_doc
         self._keyword_name = keyword_name
@@ -213,6 +213,8 @@ class _KeywordFoundFromLibrary(object):
 
     @instance_cache
     def is_deprecated(self):
+        if self._lib_deprecated:
+            return self._lib_deprecated
         from robotframework_ls.impl import text_utilities
 
         return text_utilities.has_deprecated_text(self._keyword_doc.doc)
@@ -333,13 +335,22 @@ def _collect_libraries_keywords(
 ):
     from robotframework_ls.impl.libspec_manager import LibspecManager
     from robotframework_ls.impl.protocols import ILibraryDocOrError
+    from robotframework_ls.impl import text_utilities
 
     # Get keywords from libraries
     from robocorp_ls_core.lsp import CompletionItemKind
 
     libspec_manager: LibspecManager = completion_context.workspace.libspec_manager
+    tracing = completion_context.tracing
 
     for library_info in library_infos:
+        if tracing:
+            log.debug(
+                "Collected library info: name: %s - alias: %s",
+                library_info.name,
+                library_info.alias,
+            )
+
         completion_context.check_cancelled()
 
         library_doc_or_error: ILibraryDocOrError = (
@@ -365,10 +376,20 @@ def _collect_libraries_keywords(
             else:
                 memo[key] = True
 
+            doc = library_doc.doc
+            lib_deprecated = doc and text_utilities.has_deprecated_text(doc)
+
             #: :type keyword: KeywordDoc
             for keyword in library_doc.keywords:
                 keyword_name = keyword.name
                 if collector.accepts(keyword_name):
+                    if tracing:
+                        log.debug(
+                            "Accepted keyword name: %s (libname: %s, libalias: %s)",
+                            keyword_name,
+                            library_info.name,
+                            library_info.alias,
+                        )
 
                     keyword_args: Sequence[IKeywordArg] = ()
                     if keyword.args:
@@ -376,6 +397,7 @@ def _collect_libraries_keywords(
 
                     collector.on_keyword(
                         _KeywordFoundFromLibrary(
+                            lib_deprecated,
                             library_doc,
                             keyword,
                             keyword_name,
@@ -472,7 +494,6 @@ def _collect_from_context(
 
             node_name_tok = node.get_token(Token.NAME)
             if node_name_tok is not None:
-
                 (
                     value,
                     token_errors,

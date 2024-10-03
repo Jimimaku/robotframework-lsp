@@ -1,7 +1,7 @@
 from functools import lru_cache
 import re
 import sys
-from typing import Dict, Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 
 from robocorp_ls_core.lsp import (
     DiagnosticSeverity,
@@ -10,6 +10,7 @@ from robocorp_ls_core.lsp import (
     ICustomDiagnosticDataUndefinedResourceTypedDict,
     ICustomDiagnosticDataUndefinedVarImportTypedDict,
     ICustomDiagnosticDataUndefinedLibraryTypedDict,
+    ICustomDiagnosticDataUndefinedVariableTypedDict,
 )
 from robocorp_ls_core.protocols import check_implements
 from robocorp_ls_core.robotframework_log import get_logger
@@ -76,10 +77,10 @@ class _KeywordContainer(object):
 
 
 class _VariablesCollector(AbstractVariablesCollector):
-    def __init__(self, on_unresolved_variable_import):
+    def __init__(self, on_unresolved_variable_import) -> None:
         self._variables_collected: Dict[str, List[IVariableFound]] = {}
         self._template_variables_collected: List[Tuple[str, IVariableFound]] = []
-        self.on_unresolved_variable_import = on_unresolved_variable_import
+        self.on_unresolved_variable_import: Any = on_unresolved_variable_import
 
         self._env_variables_collected: Dict[str, IVariableFound] = {}
 
@@ -238,6 +239,8 @@ def collect_analysis_errors(initial_completion_context):
         library_node: Optional[INode],
         library_doc: ILibraryDoc,
     ):
+        from robotframework_ls.impl.text_utilities import has_deprecated_text
+
         if library_node is None:
             return
 
@@ -271,6 +274,17 @@ def collect_analysis_errors(initial_completion_context):
             for error in keyword_argument_analysis.collect_keyword_usage_errors(
                 UsageInfoForKeywordArgumentAnalysis(library_node, name_token)
             ):
+                errors.append(error)
+
+            if library_doc.doc and has_deprecated_text(library_doc.doc):
+                error = create_error_from_node(
+                    library_node,
+                    f"{library_doc.name} is deprecated.",
+                    tokens=[name_token],
+                )
+                error.severity = DiagnosticSeverity.Hint
+                error.tags = [DiagnosticTag.Deprecated]
+
                 errors.append(error)
 
     def on_unresolved_library(
@@ -477,7 +491,6 @@ def collect_analysis_errors(initial_completion_context):
                         if found_in_current:
                             msg = f"Multiple keywords matching: '{keyword_usage_info.name}' in current file."
                         else:
-
                             found_in_str = "'" + "', '".join(sorted(found_in)) + "'"
                             if len(found_in) == 1:
                                 msg = f"Multiple keywords matching: '{keyword_usage_info.name}' in {found_in_str}."
@@ -565,9 +578,7 @@ def collect_analysis_errors(initial_completion_context):
                                     keyword_found.keyword_args, keyword_found
                                 )
                                 args_tokens = template_arguments_node_info.node.tokens
-                                for (
-                                    error
-                                ) in keyword_argument_analysis.collect_keyword_usage_errors(
+                                for error in keyword_argument_analysis.collect_keyword_usage_errors(
                                     UsageInfoForKeywordArgumentAnalysis(
                                         template_arguments_node_info.node,
                                         args_tokens[-1],
@@ -661,7 +672,6 @@ def _collect_unused_keyword_errors(completion_context: ICompletionContext, error
         bool,
         False,
     ):
-
         from robotframework_ls.impl.collect_keywords import collect_keywords_from_ast
 
         # The lint process usually does not have workspace indexing turned on,
@@ -790,7 +800,6 @@ def _collect_undefined_variables_errors(initial_completion_context):
     env_vars_upper = None
 
     for token_info in ast_utils.iter_variable_references(ast):
-
         initial_completion_context.check_cancelled()
 
         if token_info.node.__class__.__name__ in (
@@ -816,7 +825,6 @@ def _collect_undefined_variables_errors(initial_completion_context):
         var_col_offset = token_info.token.col_offset
 
         if token_info.var_info.var_identifier == "%":
-
             if "=" in var_name + token_info.var_info.extended_part:
                 # Consider case: %{SOME_VAR=}
                 # Consider case: %{SOME_VAR=default val}
@@ -843,7 +851,6 @@ def _collect_undefined_variables_errors(initial_completion_context):
 
         check_names = [normalize_variable_name(var_name)]
         if token_info.var_info.extended_part.strip():
-
             robot_match_in_ext = robot_search_variable(
                 token_info.var_info.extended_part
             )
@@ -890,8 +897,15 @@ def _collect_undefined_variables_errors(initial_completion_context):
                 break
 
         if not found:
-            yield create_error_from_node(
+            error = create_error_from_node(
                 token_info.node,
                 f"Undefined variable: {token_info.token.value}",
                 tokens=[token_info.token],
             )
+
+            undefined_variable_data: ICustomDiagnosticDataUndefinedVariableTypedDict = {
+                "kind": "undefined_variable",
+                "name": token_info.token.value,
+            }
+            error.data = undefined_variable_data
+            yield error

@@ -9,7 +9,7 @@
         "url": "https://github.com/robocorp/robotframework-lsp.git"
     },
     "license": "SEE LICENSE IN LICENSE.txt",
-    "version": "0.39.0",
+    "version": "1.22.3",
     "icon": "images/icon.png",
     "publisher": "robocorp",
     "engines": {
@@ -23,6 +23,8 @@
         "onCommand:robocorp.getLanguageServerPythonInfo",
         "onCommand:robocorp.getPluginsDir",
         "onCommand:robocorp.createRobot",
+        "onCommand:robocorp.createActionPackage",
+        "onCommand:robocorp.createTaskOrActionPackage",
         "onCommand:robocorp.listRobotTemplates.internal",
         "onCommand:robocorp.createRobot.internal",
         "onCommand:robocorp.uploadRobotToCloud",
@@ -36,9 +38,17 @@
         "onCommand:robocorp.uploadToExistingRobot.internal",
         "onCommand:robocorp.runInRcc.internal",
         "onCommand:robocorp.runRobotRcc",
+        "onCommand:robocorp.runActionFromActionPackage",
         "onCommand:robocorp.debugRobotRcc",
+        "onCommand:robocorp.debugActionFromActionPackage",
         "onCommand:robocorp.robotsViewTaskRun",
         "onCommand:robocorp.robotsViewTaskDebug",
+        "onCommand:robocorp.robotsViewActionRun",
+        "onCommand:robocorp.robotsViewActionDebug",
+        "onCommand:robocorp.robotsViewActionEditInput",
+        "onCommand:robocorp.robotsViewActionOpen",
+        "onCommand:robocorp.runRobocorpsPythonTask",
+        "onCommand:robocorp.debugRobocorpsPythonTask",
         "onCommand:robocorp.saveInDiskLRU",
         "onCommand:robocorp.loadFromDiskLRU",
         "onCommand:robocorp.computeRobotLaunchFromRobocorpCodeLaunch",
@@ -59,13 +69,16 @@
         "onCommand:robocorp.openLocatorsJson",
         "onCommand:robocorp.openCloudHome",
         "onCommand:robocorp.newRobocorpInspectorBrowser",
-        "onCommand:robocorp.newRobocorpInspectorImage",
         "onCommand:robocorp.newRobocorpInspectorWindows",
-        "onCommand:robocorp.newRobocorpInspectorWebRecorder",
+        "onCommand:robocorp.newRobocorpInspectorImage",
+        "onCommand:robocorp.newRobocorpInspectorJava",
+        "onCommand:robocorp.openPlaywrightRecorder",
+        "onCommand:robocorp.openPlaywrightRecorder.internal",
         "onCommand:robocorp.editRobocorpInspectorLocator",
         "onCommand:robocorp.copyLocatorToClipboard.internal",
         "onCommand:robocorp.openRobotTreeSelection",
         "onCommand:robocorp.openRobotCondaTreeSelection",
+        "onCommand:robocorp.openPackageYamlTreeSelection",
         "onCommand:robocorp.openExternally",
         "onCommand:robocorp.openInVSCode",
         "onCommand:robocorp.revealInExplorer",
@@ -75,6 +88,9 @@
         "onCommand:robocorp.sendMetric",
         "onCommand:robocorp.submitIssue.internal",
         "onCommand:robocorp.submitIssue",
+        "onCommand:robocorp.inspector.internal",
+        "onCommand:robocorp.inspector",
+        "onCommand:robocorp.inspector.duplicate",
         "onCommand:robocorp.errorFeedback.internal",
         "onCommand:robocorp.feedback.internal",
         "onCommand:robocorp.configuration.diagnostics.internal",
@@ -88,8 +104,8 @@
         "onCommand:robocorp.helpWorkItems",
         "onCommand:robocorp.convertOutputWorkItemToInput",
         "onCommand:robocorp.verifyLibraryVersion.internal",
-        "onCommand:robocorp.connectVault",
-        "onCommand:robocorp.disconnectVault",
+        "onCommand:robocorp.connectWorkspace",
+        "onCommand:robocorp.disconnectWorkspace",
         "onCommand:robocorp.getConnectedVaultWorkspace.internal",
         "onCommand:robocorp.setConnectedVaultWorkspace.internal",
         "onCommand:robocorp.openVaultHelp",
@@ -98,15 +114,28 @@
         "onCommand:robocorp.showInterpreterEnvError",
         "onCommand:robocorp.openFlowExplorerTreeSelection",
         "onCommand:robocorp.convertProject",
-        "onCommand:robocorp.saveConvertedProject.internal",
+        "onCommand:robocorp.profileImport",
+        "onCommand:robocorp.profileImport.internal",
+        "onCommand:robocorp.profileSwitch",
+        "onCommand:robocorp.profileSwitch.internal",
+        "onCommand:robocorp.profileList.internal",
+        "onCommand:robocorp.hasPreRunScripts.internal",
+        "onCommand:robocorp.runPreRunScripts.internal",
+        "onCommand:robocorp.getPyPiBaseUrls.internal",
+        "onCommand:robocorp.startActionServer",
+        "onCommand:robocorp.downloadActionServer",
+        "onCommand:robocorp.startActionServer.internal",
+        "onCommand:robocorp.listActions.internal",
+        "onCommand:robocorp.packageEnvironmentRebuild",
         "onDebugInitialConfigurations",
         "onDebugResolve:robocorp-code",
-        "onView:robocorp-robots-tree",
-        "onView:robocorp-robot-content-tree",
-        "onView:robocorp-resources-tree",
+        "onView:robocorp-task-packages-tree",
+        "onView:robocorp-package-content-tree",
+        "onView:robocorp-package-resources-tree",
         "onView:robocorp-cloud-tree",
         "onLanguage:json",
-        "onLanguage:yaml"
+        "onLanguage:yaml",
+        "onLanguage:python"
     ],
     "contributes": {
         "configuration": {
@@ -150,18 +179,38 @@
                 },
                 "robocorp.verifyLSP": {
                     "type": "boolean",
-                    "default": "true",
+                    "default": true,
                     "description": "Verify if the Robot Framework Language Server is installed?"
                 },
                 "robocorp.autoSetPythonExtensionInterpreter": {
                     "type": "boolean",
-                    "default": "true",
+                    "default": true,
                     "description": "If a file in a Robot is opened, the python extension interpreter is automatically set to match the Robot interpreter."
                 },
                 "robocorp.autoSetPythonExtensionDisableActivateTerminal": {
                     "type": "boolean",
-                    "default": "true",
+                    "default": true,
                     "description": "Automatically sets the value of \"python.terminal.activateEnvironment\" to false to avoid wrong auto-activation when Robot terminal is created."
+                },
+                "robocorp.proceedWithLongPathsDisabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Enables Robocorp Code to be started even with long paths disabled."
+                },
+                "robocorp.vaultTokenTimeoutInMinutes": {
+                    "type": "number",
+                    "default": 30,
+                    "description": "Specifies the timeout in minutes for the token generated to access the vault when a launch is made. Note: max 60, min 5, additional timeout may be added internally to reuse the token in future runs (please use Robocorp Control Room or Robocorp Assistant for longer runs)."
+                },
+                "robocorp.codeLens.roboLaunch": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Specifies whether the 'Run Task' and 'Debug Task' code lenses should be shown."
+                },
+                "robocorp.actionServer.location": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Specifies the location of the action-server executable."
                 }
             }
         },
@@ -172,29 +221,44 @@
                     "title": "Robocorp Code",
                     "icon": "images/robocorp-outline.svg"
                 }
+            ],
+            "panel": [
+                {
+                    "id": "robocorp-python-view-output",
+                    "title": "Robo Tasks Output",
+                    "icon": "$(output)"
+                }
             ]
         },
         "views": {
             "robocorp-robots": [
                 {
-                    "id": "robocorp-robots-tree",
-                    "name": "Robots",
-                    "contextualTitle": "Robots"
+                    "id": "robocorp-task-packages-tree",
+                    "name": "Task/Action Packages",
+                    "contextualTitle": "Task/Action Packages"
                 },
                 {
-                    "id": "robocorp-robot-content-tree",
-                    "name": "Robot Content",
-                    "contextualTitle": "Robot Content"
+                    "id": "robocorp-package-content-tree",
+                    "name": "Package Content",
+                    "contextualTitle": "Package Content"
                 },
                 {
-                    "id": "robocorp-resources-tree",
-                    "name": "Resources",
-                    "contextualTitle": "Resources"
+                    "id": "robocorp-package-resources-tree",
+                    "name": "Package Resources",
+                    "contextualTitle": "Package Resources"
                 },
                 {
                     "id": "robocorp-cloud-tree",
-                    "name": "Robocorp",
+                    "name": "Robocorp Cloud",
                     "contextualTitle": "Robocorp"
+                }
+            ],
+            "robocorp-python-view-output": [
+                {
+                    "type": "webview",
+                    "id": "robocorp.python.view.output",
+                    "name": "Robo Tasks Output",
+                    "contextualTitle": "Robo Tasks Output"
                 }
             ]
         },
@@ -247,13 +311,25 @@
         "commands": [
             {
                 "command": "robocorp.createRobot",
-                "title": "Create Robot",
+                "title": "Create Task Package (Robot)",
+                "category": "Robocorp",
+                "icon": "$(add)"
+            },
+            {
+                "command": "robocorp.createActionPackage",
+                "title": "Create Action Package",
+                "category": "Robocorp",
+                "icon": "$(add)"
+            },
+            {
+                "command": "robocorp.createTaskOrActionPackage",
+                "title": "Create Action Package",
                 "category": "Robocorp",
                 "icon": "$(add)"
             },
             {
                 "command": "robocorp.uploadRobotToCloud",
-                "title": "Upload Robot to the Control Room",
+                "title": "Upload Task Package (Robot) to Control Room",
                 "category": "Robocorp"
             },
             {
@@ -264,12 +340,22 @@
             },
             {
                 "command": "robocorp.runRobotRcc",
-                "title": "Run Robot",
+                "title": "Run Task Package (Robot)",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.runActionFromActionPackage",
+                "title": "Run Action (from Action Package)",
                 "category": "Robocorp"
             },
             {
                 "command": "robocorp.debugRobotRcc",
-                "title": "Debug Robot",
+                "title": "Debug Task Package (Robot)",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.debugActionFromActionPackage",
+                "title": "Debug Action (from Action Package)",
                 "category": "Robocorp"
             },
             {
@@ -291,6 +377,54 @@
                 }
             },
             {
+                "command": "robocorp.robotsViewActionRun",
+                "title": "Launch Action",
+                "category": "Robocorp",
+                "icon": {
+                    "light": "images/light/run.svg",
+                    "dark": "images/dark/run.svg"
+                }
+            },
+            {
+                "command": "robocorp.robotsViewActionDebug",
+                "title": "Debug Action",
+                "category": "Robocorp",
+                "icon": {
+                    "light": "images/light/debug.svg",
+                    "dark": "images/dark/debug.svg"
+                }
+            },
+            {
+                "command": "robocorp.robotsViewActionEditInput",
+                "title": "Configure Action Input",
+                "category": "Robocorp",
+                "icon": "$(symbol-variable)"
+            },
+            {
+                "command": "robocorp.robotsViewActionOpen",
+                "title": "Open Action",
+                "category": "Robocorp",
+                "icon": "$(go-to-file)"
+            },
+            {
+                "command": "robocorp.runRobocorpsPythonTask",
+                "title": "Run Robocorp's Python Task",
+                "category": "Robocorp",
+                "icon": {
+                    "light": "images/light/run.svg",
+                    "dark": "images/dark/run.svg"
+                }
+            },
+            {
+                "command": "robocorp.debugRobocorpsPythonTask",
+                "title": "Debug Robocorp's Python Task",
+                "category": "Robocorp",
+                "icon": {
+                    "light": "images/light/debug.svg",
+                    "dark": "images/dark/debug.svg"
+                }
+            },
+            {
                 "command": "robocorp.setPythonInterpreter",
                 "title": "Set python executable based on robot.yaml",
                 "category": "Robocorp"
@@ -303,7 +437,7 @@
             },
             {
                 "command": "robocorp.refreshRobotsView",
-                "title": "Refresh Robots view",
+                "title": "Refresh Task Packages (Robots) view",
                 "category": "Robocorp",
                 "icon": {
                     "light": "images/light/refresh.svg",
@@ -312,7 +446,7 @@
             },
             {
                 "command": "robocorp.refreshRobotContentView",
-                "title": "Refresh Robot Content view",
+                "title": "Refresh Task Package (Robot) Content view",
                 "category": "Robocorp",
                 "icon": {
                     "light": "images/light/refresh.svg",
@@ -372,13 +506,7 @@
             },
             {
                 "command": "robocorp.newRobocorpInspectorBrowser",
-                "title": "Add Browser Locator",
-                "category": "Robocorp",
-                "icon": "$(add)"
-            },
-            {
-                "command": "robocorp.newRobocorpInspectorImage",
-                "title": "Add Image Locator",
+                "title": "Add Web Locator",
                 "category": "Robocorp",
                 "icon": "$(add)"
             },
@@ -389,10 +517,34 @@
                 "icon": "$(add)"
             },
             {
-                "command": "robocorp.newRobocorpInspectorWebRecorder",
-                "title": "Record Browser actions as code (beta)",
+                "command": "robocorp.newRobocorpInspectorImage",
+                "title": "Add Image Locator",
                 "category": "Robocorp",
                 "icon": "$(add)"
+            },
+            {
+                "command": "robocorp.newRobocorpInspectorJava",
+                "title": "Add Java Locator",
+                "category": "Robocorp",
+                "icon": "$(add)"
+            },
+            {
+                "command": "robocorp.openPlaywrightRecorder",
+                "title": "Open Playwright Recorder",
+                "category": "Robocorp",
+                "icon": {
+                    "light": "images/light/run.svg",
+                    "dark": "images/dark/run.svg"
+                }
+            },
+            {
+                "command": "robocorp.openPlaywrightRecorder.internal",
+                "title": "Open Playwright Recorder Internal",
+                "category": "Robocorp",
+                "icon": {
+                    "light": "images/light/run.svg",
+                    "dark": "images/dark/run.svg"
+                }
             },
             {
                 "command": "robocorp.editRobocorpInspectorLocator",
@@ -408,13 +560,19 @@
             },
             {
                 "command": "robocorp.openRobotTreeSelection",
-                "title": "Configure Robot (robot.yaml)",
+                "title": "Configure Task Package (Robot) (robot.yaml)",
                 "category": "Robocorp",
                 "icon": "$(go-to-file)"
             },
             {
                 "command": "robocorp.openRobotCondaTreeSelection",
                 "title": "Configure Dependencies (conda.yaml)",
+                "category": "Robocorp",
+                "icon": "$(list-tree)"
+            },
+            {
+                "command": "robocorp.openPackageYamlTreeSelection",
+                "title": "Configure Action Package (package.yaml)",
                 "category": "Robocorp",
                 "icon": "$(list-tree)"
             },
@@ -444,13 +602,13 @@
             },
             {
                 "command": "robocorp.cloudUploadRobotTreeSelection",
-                "title": "Upload Robot to Control Room",
+                "title": "Upload Task Package (Robot) to Control Room",
                 "category": "Robocorp",
                 "icon": "$(cloud-upload)"
             },
             {
                 "command": "robocorp.rccTerminalCreateRobotTreeSelection",
-                "title": "Open terminal with Robot environment",
+                "title": "Open terminal with Package Python environment",
                 "category": "Robocorp",
                 "icon": "$(terminal)"
             },
@@ -465,6 +623,21 @@
                 "category": "Robocorp"
             },
             {
+                "command": "robocorp.inspector.internal",
+                "title": "Inspector Manager (internal)",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.inspector",
+                "title": "Open Inspector",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.inspector.duplicate",
+                "title": "Create & manage locators",
+                "category": "Robocorp"
+            },
+            {
                 "command": "robocorp.errorFeedback.internal",
                 "title": "Error feedback (internal)",
                 "category": "Robocorp"
@@ -476,28 +649,28 @@
             },
             {
                 "command": "robocorp.configuration.diagnostics.internal",
-                "title": "Robot Configuration Diagnostics (internal)",
+                "title": "Task Package (Robot) Configuration Diagnostics (internal)",
                 "category": "Robocorp"
             },
             {
                 "command": "robocorp.configuration.diagnostics",
-                "title": "Robot Configuration Diagnostics",
+                "title": "Task Package (Robot) Configuration Diagnostics",
                 "category": "Robocorp"
             },
             {
                 "command": "robocorp.rccTerminalNew",
-                "title": "Terminal with Robot environment",
+                "title": "Terminal with Task Package (Robot) environment",
                 "category": "Robocorp",
                 "icon": "$(terminal)"
             },
             {
                 "command": "robocorp.listWorkItems.internal",
-                "title": "Lists the work items available for a Robot",
+                "title": "Lists the work items available for a Task Package (Robot)",
                 "category": "Robocorp"
             },
             {
                 "command": "robocorp.updateLaunchEnv",
-                "title": "Updates the environment variables used for some launch (given a Robot)",
+                "title": "Updates the environment variables used for some launch (given a Task Package (Robot))",
                 "category": "Robocorp"
             },
             {
@@ -530,25 +703,25 @@
                 "icon": "$(fold-up)"
             },
             {
-                "command": "robocorp.connectVault",
-                "title": "Connect to online secrets vault",
+                "command": "robocorp.connectWorkspace",
+                "title": "Connect to Control Room Workspace (vault, storage, ...)",
                 "category": "Robocorp",
                 "icon": "$(lock)"
             },
             {
-                "command": "robocorp.disconnectVault",
-                "title": "Disconnect from online secrets vault",
+                "command": "robocorp.disconnectWorkspace",
+                "title": "Disconnect from Control Room Workspace",
                 "category": "Robocorp",
                 "icon": "$(unlock)"
             },
             {
                 "command": "robocorp.getConnectedVaultWorkspace.internal",
-                "title": "Gets workspace id of the currently connected vault",
+                "title": "Gets workspace id currently connected",
                 "category": "Robocorp"
             },
             {
                 "command": "robocorp.setConnectedVaultWorkspace.internal",
-                "title": "Sets the currently connected vault workspace",
+                "title": "Sets the currently connected Control Room Workspace",
                 "category": "Robocorp"
             },
             {
@@ -579,12 +752,74 @@
             },
             {
                 "command": "robocorp.convertProject",
-                "title": "Convert third party RPA file to Robocorp Robot",
+                "title": "Conversion Accelerator from third party RPA to Robocorp Task Package (Robot)",
                 "category": "Robocorp"
             },
             {
-                "command": "robocorp.saveConvertedProject.internal",
-                "title": "Save converted Robocorp Project",
+                "command": "robocorp.profileImport",
+                "title": "Import Profile",
+                "category": "Robocorp",
+                "icon": "$(file-symlink-file)"
+            },
+            {
+                "command": "robocorp.profileImport.internal",
+                "title": "Import Profile (internal)",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.profileSwitch",
+                "title": "Switch Profile",
+                "category": "Robocorp",
+                "icon": "$(git-pull-request)"
+            },
+            {
+                "command": "robocorp.profileSwitch.internal",
+                "title": "Switch Profile",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.profileList.internal",
+                "title": "List Profiles",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.hasPreRunScripts.internal",
+                "title": "Has Pre Run Scripts",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.runPreRunScripts.internal",
+                "title": "Run Pre Run Scripts",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.getPyPiBaseUrls.internal",
+                "title": "Get PyPi base urls",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.startActionServer",
+                "title": "Start Action Server",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.downloadActionServer",
+                "title": "Download Action Server",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.startActionServer.internal",
+                "title": "Start Action Server (internal)",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.listActions.internal",
+                "title": "Lists the actions available in an action package given a root dir (internal)",
+                "category": "Robocorp"
+            },
+            {
+                "command": "robocorp.packageEnvironmentRebuild",
+                "title": "Rebuild Package Environment",
                 "category": "Robocorp"
             }
         ],
@@ -592,189 +827,229 @@
             "view/title": [
                 {
                     "command": "robocorp.refreshRobotsView",
-                    "when": "view == robocorp-robots-tree",
+                    "when": "view == robocorp-task-packages-tree",
                     "group": "navigation"
                 },
                 {
-                    "command": "robocorp.createRobot",
-                    "when": "view == robocorp-robots-tree",
+                    "command": "robocorp.createTaskOrActionPackage",
+                    "when": "view == robocorp-task-packages-tree",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.newFileInRobotContentView",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.newFolderInRobotContentView",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.refreshRobotContentView",
-                    "when": "view == robocorp-robot-content-tree",
+                    "when": "view == robocorp-package-content-tree",
                     "group": "navigation"
                 }
             ],
             "view/item/context": [
                 {
                     "command": "robocorp.robotsViewTaskRun",
-                    "when": "view == robocorp-robots-tree && viewItem == taskItem",
-                    "group": "inline"
+                    "when": "view == robocorp-task-packages-tree && viewItem == taskItem",
+                    "group": "inline@1"
                 },
                 {
                     "command": "robocorp.robotsViewTaskDebug",
-                    "when": "view == robocorp-robots-tree && viewItem == taskItem",
-                    "group": "inline"
+                    "when": "view == robocorp-task-packages-tree && viewItem == taskItem",
+                    "group": "inline@2"
+                },
+                {
+                    "command": "robocorp.robotsViewActionOpen",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "inline@1"
+                },
+                {
+                    "command": "robocorp.robotsViewActionEditInput",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "inline@2"
+                },
+                {
+                    "command": "robocorp.robotsViewActionRun",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "inline@3"
+                },
+                {
+                    "command": "robocorp.robotsViewActionDebug",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "inline@4"
                 },
                 {
                     "command": "robocorp.openRobotTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == actionsInRobotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionsInRobotItem",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.openRobotCondaTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == actionsInRobotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionsInRobotItem",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.rccTerminalCreateRobotTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == actionsInRobotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionsInRobotItem",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.cloudUploadRobotTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == actionsInRobotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionsInRobotItem",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.openFlowExplorerTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == actionsInRobotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionsInRobotItem",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.robotsViewTaskRun",
-                    "when": "view == robocorp-robots-tree && viewItem == taskItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == taskItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.robotsViewTaskDebug",
-                    "when": "view == robocorp-robots-tree && viewItem == taskItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == taskItem",
+                    "group": "navigation"
+                },
+                {
+                    "command": "robocorp.robotsViewActionRun",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "navigation"
+                },
+                {
+                    "command": "robocorp.robotsViewActionDebug",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "navigation"
+                },
+                {
+                    "command": "robocorp.robotsViewActionEditInput",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
+                    "group": "navigation"
+                },
+                {
+                    "command": "robocorp.robotsViewActionOpen",
+                    "when": "view == robocorp-task-packages-tree && viewItem == actionItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.revealRobotInExplorer",
-                    "when": "view == robocorp-robots-tree && viewItem == robotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == robotItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.openRobotTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == robotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == robotItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.rccTerminalCreateRobotTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == robotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == robotItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.cloudUploadRobotTreeSelection",
-                    "when": "view == robocorp-robots-tree && viewItem == robotItem",
+                    "when": "view == robocorp-task-packages-tree && viewItem == robotItem",
                     "group": "navigation"
                 },
                 {
                     "command": "robocorp.newFileInRobotContentView",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
                     "group": "0_new"
                 },
                 {
                     "command": "robocorp.newFolderInRobotContentView",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected && viewItem == directoryItem",
                     "group": "0_new"
                 },
                 {
                     "command": "robocorp.openExternally",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected && viewItem == fileItem",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected && viewItem == fileItem",
                     "group": "1_open"
                 },
                 {
                     "command": "robocorp.openInVSCode",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected && viewItem == fileItem",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected && viewItem == fileItem",
                     "group": "1_open"
                 },
                 {
                     "command": "robocorp.revealInExplorer",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected",
                     "group": "1_open"
                 },
                 {
                     "command": "robocorp.renameResourceInRobotContentView",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected",
                     "group": "2_change"
                 },
                 {
                     "command": "robocorp.deleteResourceInRobotContentView",
-                    "when": "view == robocorp-robot-content-tree && robocorp-code:single-robot-selected",
+                    "when": "view == robocorp-package-content-tree && robocorp-code:single-robot-selected",
                     "group": "2_change"
                 },
                 {
                     "command": "robocorp.newRobocorpInspectorBrowser",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == newBrowserLocator",
-                    "group": "inline"
-                },
-                {
-                    "command": "robocorp.newRobocorpInspectorImage",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == newImageLocator",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == newBrowserLocator",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.newRobocorpInspectorWindows",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == newWindowsLocator",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == newWindowsLocator",
                     "group": "inline"
                 },
                 {
-                    "command": "robocorp.newRobocorpInspectorWebRecorder",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == newWebRecorder",
+                    "command": "robocorp.newRobocorpInspectorImage",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == newImageLocator",
+                    "group": "inline"
+                },
+                {
+                    "command": "robocorp.newRobocorpInspectorJava",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == newJavaLocator",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.openLocatorsJson",
-                    "when": "view == robocorp-resources-tree && viewItem == locatorsRoot",
+                    "when": "view == robocorp-package-resources-tree && viewItem == locatorsRoot",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.editRobocorpInspectorLocator",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == locatorEntry",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == locatorEntry",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.copyLocatorToClipboard.internal",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == locatorEntry",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == locatorEntry",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.removeLocatorFromJson",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == locatorEntry",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == locatorEntry",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.helpWorkItems",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == workItemsRoot",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == workItemsRoot",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.newWorkItemInWorkItemsView",
-                    "when": "view == robocorp-resources-tree && robocorp-code:single-robot-selected && viewItem == inputWorkItemDir",
+                    "when": "view == robocorp-package-resources-tree && robocorp-code:single-robot-selected && viewItem == inputWorkItemDir",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.deleteWorkItemInWorkItemsView",
-                    "when": "view == robocorp-resources-tree && viewItem == outputWorkItem || viewItem == inputWorkItem",
+                    "when": "view == robocorp-package-resources-tree && viewItem == outputWorkItem || viewItem == inputWorkItem",
                     "group": "inline"
                 },
                 {
                     "command": "robocorp.convertOutputWorkItemToInput",
-                    "when": "view == robocorp-resources-tree && viewItem == outputWorkItem",
+                    "when": "view == robocorp-package-resources-tree && viewItem == outputWorkItem",
                     "group": "inline"
                 },
                 {
@@ -793,23 +1068,61 @@
                     "group": "inline"
                 },
                 {
-                    "command": "robocorp.connectVault",
-                    "when": "view == robocorp-cloud-tree && viewItem == vaultDisconnected",
+                    "command": "robocorp.connectWorkspace",
+                    "when": "view == robocorp-cloud-tree && viewItem == workspaceDisconnected",
                     "group": "inline"
                 },
                 {
-                    "command": "robocorp.disconnectVault",
-                    "when": "view == robocorp-cloud-tree && viewItem == vaultConnected",
+                    "command": "robocorp.disconnectWorkspace",
+                    "when": "view == robocorp-cloud-tree && viewItem == workspaceConnected",
+                    "group": "inline"
+                },
+                {
+                    "command": "robocorp.profileImport",
+                    "when": "view == robocorp-cloud-tree && viewItem == profileItem",
+                    "group": "inline"
+                },
+                {
+                    "command": "robocorp.profileSwitch",
+                    "when": "view == robocorp-cloud-tree && viewItem == profileItem",
                     "group": "inline"
                 }
             ],
             "commandPalette": [
+                {
+                    "command": "robocorp.createTaskOrActionPackage",
+                    "when": "false"
+                },
                 {
                     "command": "robocorp.robotsViewTaskRun",
                     "when": "false"
                 },
                 {
                     "command": "robocorp.robotsViewTaskDebug",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.robotsViewActionRun",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.robotsViewActionDebug",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.robotsViewActionEditInput",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.robotsViewActionOpen",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.runRobocorpsPythonTask",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.debugRobocorpsPythonTask",
                     "when": "false"
                 },
                 {
@@ -845,6 +1158,10 @@
                     "when": "false"
                 },
                 {
+                    "command": "robocorp.openPlaywrightRecorder.internal",
+                    "when": "false"
+                },
+                {
                     "command": "robocorp.editRobocorpInspectorLocator",
                     "when": "false"
                 },
@@ -858,6 +1175,10 @@
                 },
                 {
                     "command": "robocorp.openRobotCondaTreeSelection",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.openPackageYamlTreeSelection",
                     "when": "false"
                 },
                 {
@@ -881,11 +1202,11 @@
                     "when": "false"
                 },
                 {
-                    "command": "robocorp.rccTerminalCreateRobotTreeSelection",
+                    "command": "robocorp.submitIssue.internal",
                     "when": "false"
                 },
                 {
-                    "command": "robocorp.submitIssue.internal",
+                    "command": "robocorp.inspector.internal",
                     "when": "false"
                 },
                 {
@@ -945,7 +1266,35 @@
                     "when": "false"
                 },
                 {
-                    "command": "robocorp.saveConvertedProject.internal",
+                    "command": "robocorp.profileImport.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.profileSwitch.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.profileList.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.hasPreRunScripts.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.runPreRunScripts.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.getPyPiBaseUrls.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.startActionServer.internal",
+                    "when": "false"
+                },
+                {
+                    "command": "robocorp.listActions.internal",
                     "when": "false"
                 }
             ]
@@ -967,22 +1316,22 @@
         "prettier-fix": "npx prettier -w vscode-client/**/*.ts"
     },
     "devDependencies": {
-        "@types/mocha": "^2.2.32",
-        "@types/node": "^13.0.00",
-        "@types/vscode": "1.65.0",
         "@types/adm-zip": "^0.5.0",
+        "@types/mocha": "^2.2.32",
+        "@types/node": "^15.0.00",
         "@types/rimraf": "^3.0.2",
+        "@types/vscode": "1.65.0",
         "prettier": "2.4.1",
-        "vscode-test": "1.5.1",
-        "typescript": "^4.5.4"
+        "typescript": "^4.5.4",
+        "vscode-test": "1.5.1"
     },
     "dependencies": {
-        "vscode-languageclient": "^7.0.0",
-        "path-exists": "^4.0.0",
+        "adm-zip": "^0.5.9",
         "http-proxy-agent": "^2.1.0",
         "https-proxy-agent": "^2.2.4",
-        "vscode-nls": "^4.1.2",
-        "adm-zip": "^0.5.9",
-        "rimraf": "^3.0.2"
+        "path-exists": "^4.0.0",
+        "rimraf": "^3.0.2",
+        "vscode-languageclient": "^7.0.0",
+        "vscode-nls": "^4.1.2"
     }
 }

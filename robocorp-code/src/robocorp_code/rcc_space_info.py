@@ -1,15 +1,15 @@
-from dataclasses import dataclass
 import enum
-from pathlib import Path
-import time
-
-from robocorp_ls_core.robotframework_log import get_logger
-from typing import Optional, ContextManager
 import os
-from robocorp_code.protocols import IRCCSpaceInfo
-from robocorp_ls_core.protocols import check_implements
+import time
+from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
+from typing import ContextManager, Optional
 
+from robocorp_ls_core.protocols import check_implements
+from robocorp_ls_core.robotframework_log import get_logger
+
+from robocorp_code.protocols import IRCCSpaceInfo
 
 log = get_logger(__name__)
 
@@ -44,7 +44,6 @@ def write_text(path: Path, contents, encoding="utf-8"):
 
 @dataclass
 class RCCSpaceInfo:
-
     space_name: str
     space_path: Path
     curr_status: CurrentSpaceStatus
@@ -75,6 +74,15 @@ class RCCSpaceInfo:
         return self.space_path / "pid"
 
     def load_last_usage(self, none_if_not_found: bool = False) -> Optional[float]:
+        target = self.space_path / f"time_touch"
+        if target.exists():
+            last_usage = target.stat().st_mtime
+            self.last_usage = last_usage
+            return last_usage
+
+        # Old code (the code used to write 'time_timespamp' i.e.: time_9302943342
+        # but it's now upgraded to use a `time_touch` file which is just touched
+        # to upgrade the time).
         found = []
         for entry in os.scandir(self.space_path):
             if entry.name.startswith("time_"):
@@ -108,9 +116,9 @@ class RCCSpaceInfo:
         return last_usage
 
     def update_last_usage(self) -> float:
-        last_usage = time.time()
-        target = self.space_path / f"time_{last_usage}"
-        write_text(target, "", "utf-8")
+        target = self.space_path / f"time_touch"
+        target.touch()
+        last_usage = target.stat().st_mtime
         self.last_usage = last_usage
         return last_usage
 
@@ -129,8 +137,8 @@ class RCCSpaceInfo:
         return has_timeout_elapsed
 
     def pretty(self):
-        from dataclasses import fields
         import textwrap
+        from dataclasses import fields
 
         ret = ["RCCSpaceInfo:"]
         for field in fields(self):
@@ -229,6 +237,28 @@ class RCCSpaceInfo:
         _: IRCCSpaceInfo = check_implements(self)
 
 
+def _remove_pip_special_flags(obj):
+    if isinstance(obj, list):
+        new_lst = []
+        for item in obj:
+            if isinstance(item, (list, dict)):
+                new_lst.append(_remove_pip_special_flags(item))
+
+            elif isinstance(item, str):
+                if "--use-feature" in item:
+                    continue
+                new_lst.append(item)
+        return new_lst
+
+    if isinstance(obj, dict):
+        new_dct = {}
+        for k, v in obj.items():
+            new_dct[k] = _remove_pip_special_flags(v)
+        return new_dct
+
+    return obj
+
+
 @lru_cache(maxsize=50)
 def format_conda_contents_to_compare(contents: str) -> str:
     try:
@@ -236,8 +266,9 @@ def format_conda_contents_to_compare(contents: str) -> str:
 
         load_yaml = yaml_wrapper.load
         loaded = load_yaml(contents)
+        loaded = _remove_pip_special_flags(loaded)
         return repr(loaded)
-    except:
+    except Exception:
         log.info("Unable to parse yaml: %s", contents)
         lst = []
         for line in contents.splitlines(keepends=False):

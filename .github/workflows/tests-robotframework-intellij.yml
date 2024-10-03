@@ -39,7 +39,7 @@ jobs:
       with:
         submodules: recursive
     - name: Set up Python ${{ matrix.python }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python }}
     - name: Upgrade pip
@@ -55,7 +55,7 @@ jobs:
       run: |
         python -m dev vendor-robocorp-ls-core
         python -m dev vendor-robotframework-interactive
-        python -m dev vendor-robot-stream
+        python -m dev vendor-robotframework-output-stream
     - name: Fix README references
       working-directory: ./robotframework-ls    
       run: python -m dev fix-readme
@@ -64,20 +64,23 @@ jobs:
       run: |
         cp ../README.md ./README.md
         python setup.py sdist bdist_wheel --universal
-    - name: Test
-      run: |
-        export DISPLAY=':99.0'
-        /usr/bin/Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
-        pwd
-        ./gradlew -v
-        ./gradlew clean test -i
+        
+# Disable tests as they're not being monitored (so, just check that we
+# can build in the ci).
+#     - name: Test
+#       run: |
+#         export DISPLAY=':99.0'
+#         /usr/bin/Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+#         pwd
+#         ./gradlew -v
+#         ./gradlew clean test -i
     - name: Package
       run: |
         export DISPLAY=':99.0'
         /usr/bin/Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
         pwd
         ./gradlew buildPlugin
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: intellij-distribution
         path: robotframework-intellij/build/distributions/

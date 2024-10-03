@@ -1,16 +1,25 @@
 import * as vscode from "vscode";
-import { TREE_VIEW_ROBOCORP_RESOURCES_TREE } from "./robocorpViews";
-import { getSingleTreeSelection, LocatorEntry, SingleTreeSelectionOpts } from "./viewsCommon";
+import { TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE } from "./robocorpViews";
+import {
+    getSelectedRobot,
+    getSingleTreeSelection,
+    LocatorEntry,
+    NO_PACKAGE_FOUND_MSG,
+    RobotEntry,
+    RobotEntryType,
+    SingleTreeSelectionOpts,
+} from "./viewsCommon";
 import { LocatorsTreeDataProvider } from "./viewsLocators";
 import { RobotSelectionTreeDataProviderBase } from "./viewsRobotSelectionTreeBase";
 import { WorkItemsTreeDataProvider } from "./viewsWorkItems";
 
+const NO_ROBOT_TYPE = "no-robot-selected";
 const ROOT_TYPE = "root";
 const SUBTREE_WORK_ITEMS = "work-items";
 const SUBTREE_LOCATORS = "locators";
 
 export async function getLocatorSingleTreeSelection(opts?: SingleTreeSelectionOpts): Promise<LocatorEntry | undefined> {
-    let selection = await getSingleTreeSelection<any>(TREE_VIEW_ROBOCORP_RESOURCES_TREE, opts);
+    let selection = await getSingleTreeSelection<any>(TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE, opts);
     if (selection.resourcesTreeType == ROOT_TYPE) {
         return undefined; // Root items aren't part of the locators tree.
     }
@@ -26,19 +35,44 @@ export class ResourcesTreeDataProvider extends RobotSelectionTreeDataProviderBas
     workItemsTreeDataProvider = new WorkItemsTreeDataProvider();
 
     async getChildren(element?: any): Promise<any> {
-        if (!element) {
+        const robotEntry: RobotEntry = getSelectedRobot();
+        if (!robotEntry) {
+            this.lastRobotEntry = undefined;
             return [
                 {
-                    name: "Locators",
+                    name: NO_PACKAGE_FOUND_MSG,
+                    resourcesTreeType: NO_ROBOT_TYPE,
+                },
+            ];
+        }
+
+        this.lastRobotEntry = robotEntry;
+
+        if (!element) {
+            const ret: any[] = [
+                {
+                    name: "Inspectors / Locators",
                     resourcesTreeType: ROOT_TYPE,
                     subTree: SUBTREE_LOCATORS,
+                    tooltip:
+                        "Inspectors which output code and locators (which identify how to locate a specific element in a given library).",
                 },
-                {
+            ];
+            if (
+                robotEntry.type !== RobotEntryType.Action &&
+                robotEntry.type !== RobotEntryType.ActionPackage &&
+                robotEntry.type !== RobotEntryType.ActionsInActionPackage &&
+                robotEntry.type !== RobotEntryType.ActionsInRobot
+            ) {
+                // No work items unless it's a task package (i.e.: Robot)
+                // Using reverse logic because we need to keep showing the Work Items in cases like RobotEntryType == Error
+                ret.push({
                     name: "Work Items",
                     resourcesTreeType: ROOT_TYPE,
                     subTree: SUBTREE_WORK_ITEMS,
-                },
-            ];
+                });
+            }
+            return ret;
         }
 
         let childrenForElement = element;
@@ -64,6 +98,12 @@ export class ResourcesTreeDataProvider extends RobotSelectionTreeDataProviderBas
     }
 
     getTreeItem(element: any): vscode.TreeItem {
+        if (element.resourcesTreeType === NO_ROBOT_TYPE) {
+            const item = new vscode.TreeItem(element.name);
+            item.iconPath = new vscode.ThemeIcon("error");
+            return item;
+        }
+
         if (element.resourcesTreeType === ROOT_TYPE) {
             const item = new vscode.TreeItem(element.name, vscode.TreeItemCollapsibleState.Expanded);
             if (element.subTree === SUBTREE_LOCATORS) {
@@ -72,6 +112,9 @@ export class ResourcesTreeDataProvider extends RobotSelectionTreeDataProviderBas
             } else if (element.subTree === SUBTREE_WORK_ITEMS) {
                 item.contextValue = "workItemsRoot";
                 item.iconPath = new vscode.ThemeIcon("combine");
+            }
+            if (element.tooltip !== undefined) {
+                item.tooltip = element.tooltip;
             }
             return item;
         }

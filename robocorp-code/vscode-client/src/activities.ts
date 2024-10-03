@@ -22,9 +22,36 @@ import {
     showSelectOneQuickPick,
     getWorkspaceDescription,
     selectWorkspace,
+    showSelectOneStrQuickPick,
+    askForWs,
 } from "./ask";
 import { feedback, feedbackRobocorpCodeError, getEndpointUrl } from "./rcc";
 import { refreshCloudTreeView } from "./viewsRobocorp";
+import {
+    ActionResult,
+    ActionResultWorkItems,
+    InterpreterInfo,
+    IVaultInfo,
+    LibraryVersionInfoDict,
+    LocalRobotMetadataInfo,
+    PackageInfo,
+    RobotTemplate,
+    WorkItemsInfo,
+    WorkspaceInfo,
+} from "./protocols";
+import { envVarsForOutViewIntegration } from "./output/outViewRunIntegration";
+import { connectWorkspace } from "./vault";
+import {
+    areThereRobotsInWorkspace,
+    isActionPackage,
+    isDirectoryAPackageDirectory,
+    verifyIfPathOkToCreatePackage,
+} from "./common";
+
+export interface ListOpts {
+    showTaskPackages: boolean;
+    showActionPackages: boolean;
+}
 
 export async function cloudLogin(): Promise<boolean> {
     let loggedIn: boolean;
@@ -66,6 +93,15 @@ export async function cloudLogin(): Promise<boolean> {
             }
         }
     } while (!loggedIn);
+
+    const doConnectToWorkspace = await showSelectOneStrQuickPick(
+        ["Yes", "No"],
+        "Linked account. Connect to a workspace to access related Vault Secrets and Storage?"
+    );
+    if (doConnectToWorkspace === "Yes") {
+        const checkLogin = false; // no need to check login, we just logged in.
+        await connectWorkspace(checkLogin);
+    }
 
     return true;
 }
@@ -120,17 +156,23 @@ export async function resolveInterpreter(targetRobot: string): Promise<ActionRes
             "robot.resolveInterpreter",
             targetRobot
         );
+        if (interpreter === null || (typeof interpreter === "string" && interpreter === "null")) {
+            throw Error("Interpreter not found. Retrying call...");
+        }
         return { "success": true, "message": "", "result": interpreter };
     } catch (error) {
         // We couldn't resolve with the robotframework language server command, fallback to the robocorp code command.
         try {
-            let result: ActionResult<InterpreterInfo | undefined> = await commands.executeCommand(
+            let interpreter: ActionResult<InterpreterInfo | undefined> = await commands.executeCommand(
                 roboCommands.ROBOCORP_RESOLVE_INTERPRETER,
                 {
                     "target_robot": targetRobot,
                 }
             );
-            return result;
+            if (interpreter === null || (typeof interpreter === "string" && interpreter === "null")) {
+                throw Error("Interpreter not found");
+            }
+            return interpreter;
         } catch (error) {
             logError("Error resolving interpreter.", error, "ACT_RESOLVE_INTERPRETER");
             return { "success": false, "message": "Unable to resolve interpreter.", "result": undefined };
@@ -140,7 +182,8 @@ export async function resolveInterpreter(targetRobot: string): Promise<ActionRes
 
 export async function listAndAskRobotSelection(
     selectionMessage: string,
-    noRobotErrorMessage: string
+    noRobotErrorMessage: string,
+    opts: ListOpts
 ): Promise<LocalRobotMetadataInfo> {
     let actionResult: ActionResult<LocalRobotMetadataInfo[]> = await commands.executeCommand(
         roboCommands.ROBOCORP_LOCAL_LIST_ROBOTS_INTERNAL
@@ -152,6 +195,25 @@ export async function listAndAskRobotSelection(
     }
     let robotsInfo: LocalRobotMetadataInfo[] = actionResult.result;
 
+    if (!robotsInfo || robotsInfo.length == 0) {
+        window.showInformationMessage(noRobotErrorMessage);
+        return;
+    }
+
+    const filter = (entry: LocalRobotMetadataInfo) => {
+        const isActionPkg = isActionPackage(entry);
+        const isTaskPackage = !isActionPkg;
+
+        if (!opts.showActionPackages && isActionPkg) {
+            return false;
+        }
+        if (!opts.showTaskPackages && isTaskPackage) {
+            return false;
+        }
+        return true;
+    };
+
+    robotsInfo = robotsInfo.filter(filter);
     if (!robotsInfo || robotsInfo.length == 0) {
         window.showInformationMessage(noRobotErrorMessage);
         return;
@@ -223,21 +285,21 @@ export async function setPythonInterpreterFromRobotYaml() {
         roboCommands.ROBOCORP_LOCAL_LIST_ROBOTS_INTERNAL
     );
     if (!actionResult.success) {
-        window.showInformationMessage("Error listing existing robots: " + actionResult.message);
+        window.showInformationMessage("Error listing existing packages: " + actionResult.message);
         return;
     }
     let robotsInfo: LocalRobotMetadataInfo[] = actionResult.result;
 
     if (!robotsInfo || robotsInfo.length == 0) {
         window.showInformationMessage(
-            "Unable to set Python extension interpreter (no Robot detected in the Workspace)."
+            "Unable to set Python extension interpreter (no Action nor Task Package detected in the Workspace)."
         );
         return;
     }
 
     let robot: LocalRobotMetadataInfo = await askRobotSelection(
         robotsInfo,
-        "Please select the Robot from which the python executable should be used."
+        "Please select the Action or Task Package from which the python executable should be used."
     );
     if (!robot) {
         return;
@@ -314,15 +376,21 @@ export async function rccConfigurationDiagnostics() {
         return;
     }
     let robotsInfo: LocalRobotMetadataInfo[] = actionResult.result;
+    if (robotsInfo) {
+        // Only use task packages.
+        robotsInfo = robotsInfo.filter((r) => {
+            return !isActionPackage(r);
+        });
+    }
 
     if (!robotsInfo || robotsInfo.length == 0) {
         window.showInformationMessage(
-            "No Robot detected in the Workspace. If a robot.yaml is available, open it for more information."
+            "No Task Package detected in the Workspace. If a robot.yaml is available, open it for more information."
         );
         return;
     }
 
-    let robot = await askRobotSelection(robotsInfo, "Please select the Robot to analyze.");
+    let robot = await askRobotSelection(robotsInfo, "Please select the Task Package to analyze.");
     if (!robot) {
         return;
     }
@@ -332,7 +400,7 @@ export async function rccConfigurationDiagnostics() {
         { "robotYaml": robot.filePath }
     );
     if (!diagnosticsActionResult.success) {
-        window.showErrorMessage("Error computing diagnostics for Robot: " + diagnosticsActionResult.message);
+        window.showErrorMessage("Error computing diagnostics for Task Package: " + diagnosticsActionResult.message);
         return;
     }
 
@@ -356,14 +424,19 @@ export async function uploadRobot(robot?: LocalRobotMetadataInfo) {
         roboCommands.ROBOCORP_LOCAL_LIST_ROBOTS_INTERNAL
     );
     if (!actionResult.success) {
-        window.showInformationMessage("Error submitting Robot to the Control Room: " + actionResult.message);
+        window.showInformationMessage("Error submitting Task Package (Robot) to Control Room: " + actionResult.message);
         return;
     }
     let robotsInfo: LocalRobotMetadataInfo[] = actionResult.result;
+    if (robotsInfo) {
+        robotsInfo = robotsInfo.filter((r) => {
+            return !isActionPackage(r);
+        });
+    }
 
     if (!robotsInfo || robotsInfo.length == 0) {
         window.showInformationMessage(
-            "Unable to submit Robot to the Control Room (no Robot detected in the Workspace)."
+            "Unable to submit Task Package (Robot) to Control Room (no Task Package detected in the Workspace)."
         );
         return;
     }
@@ -382,7 +455,10 @@ export async function uploadRobot(robot?: LocalRobotMetadataInfo) {
     }
 
     if (!robot) {
-        robot = await askRobotSelection(robotsInfo, "Please select the Robot to upload to the Control Room.");
+        robot = await askRobotSelection(
+            robotsInfo,
+            "Please select the Task Package (Robot) to upload to the Control Room."
+        );
         if (!robot) {
             return;
         }
@@ -548,13 +624,20 @@ export async function askAndRunRobotRCC(noDebug: boolean) {
         roboCommands.ROBOCORP_LOCAL_LIST_ROBOTS_INTERNAL
     );
     if (!actionResult.success) {
-        window.showErrorMessage("Error listing Robots: " + actionResult.message);
+        window.showErrorMessage("Error listing Task Packages (Robots): " + actionResult.message);
         return;
     }
     let robotsInfo: LocalRobotMetadataInfo[] = actionResult.result;
+    if (robotsInfo) {
+        robotsInfo = robotsInfo.filter((r) => {
+            return !isActionPackage(r);
+        });
+    }
 
     if (!robotsInfo || robotsInfo.length == 0) {
-        window.showInformationMessage("Unable to run Robot (no Robot detected in the Workspace).");
+        window.showInformationMessage(
+            "Unable to run Task Package (Robot) (no Task Package detected in the Workspace)."
+        );
         return;
     }
 
@@ -585,7 +668,9 @@ export async function askAndRunRobotRCC(noDebug: boolean) {
     }
 
     if (!items) {
-        window.showInformationMessage("Unable to run Robot (no Robot detected in the Workspace).");
+        window.showInformationMessage(
+            "Unable to run Task Package (Robot) (no Task Package detected in the Workspace)."
+        );
         return;
     }
 
@@ -595,7 +680,7 @@ export async function askAndRunRobotRCC(noDebug: boolean) {
     } else {
         selectedItem = await window.showQuickPick(items, {
             "canPickMany": false,
-            "placeHolder": "Please select the Robot and Task to run.",
+            "placeHolder": "Please select the Task Package (Robot) and Task to run.",
             "ignoreFocusOut": true,
         });
     }
@@ -628,65 +713,20 @@ export async function runRobotRCC(noDebug: boolean, robotYaml: string, taskName:
 }
 
 export async function createRobot() {
-    let wsFolders: ReadonlyArray<WorkspaceFolder> = workspace.workspaceFolders;
-    if (!wsFolders) {
-        window.showErrorMessage("Unable to create Robot (no workspace folder is currently opened).");
-        return;
-    }
-
     // Start up async calls.
     let asyncListRobotTemplates: Thenable<ActionResult<RobotTemplate[]>> = commands.executeCommand(
         roboCommands.ROBOCORP_LIST_ROBOT_TEMPLATES_INTERNAL
     );
 
-    let asyncListLocalRobots: Thenable<ActionResult<LocalRobotMetadataInfo[]>> = commands.executeCommand(
-        roboCommands.ROBOCORP_LOCAL_LIST_ROBOTS_INTERNAL
-    );
-
-    let ws: WorkspaceFolder;
-    if (wsFolders.length == 1) {
-        ws = wsFolders[0];
-    } else {
-        ws = await window.showWorkspaceFolderPick({
-            "placeHolder": "Please select the workspace folder to create the Robot.",
-            "ignoreFocusOut": true,
-        });
-    }
+    const robotsInWorkspacePromise: Promise<boolean> = areThereRobotsInWorkspace();
+    let ws: WorkspaceFolder | undefined = await askForWs();
     if (!ws) {
         // Operation cancelled.
         return;
     }
 
-    // Check if we still don't have a Robot in this folder (i.e.: if we have a Robot in the workspace
-    // root already, we shouldn't create another Robot inside it).
-    try {
-        let dirContents: [string, FileType][] = await vscode.workspace.fs.readDirectory(ws.uri);
-        for (const element of dirContents) {
-            if (element[0] === "robot.yaml") {
-                window.showErrorMessage(
-                    "It's not possible to create a Robot in: " +
-                        ws.uri.fsPath +
-                        " because this workspace folder is already a Robot (nested Robots are not allowed)."
-                );
-                return;
-            }
-        }
-    } catch (error) {
-        logError("Error reading contents of: " + ws.uri.fsPath, error, "ACT_CREATE_ROBOT");
-    }
-
-    let actionResultListLocalRobots: ActionResult<LocalRobotMetadataInfo[]> = await asyncListLocalRobots;
-
-    let robotsInWorkspace = false;
-    if (!actionResultListLocalRobots.success) {
-        feedbackRobocorpCodeError("ACT_LIST_ROBOT");
-        window.showErrorMessage(
-            "Error listing robots: " + actionResultListLocalRobots.message + " (Robot creation will proceed)."
-        );
-        // This shouldn't happen, but let's proceed as if there were no Robots in the workspace.
-    } else {
-        let robotsInfo: LocalRobotMetadataInfo[] = actionResultListLocalRobots.result;
-        robotsInWorkspace = robotsInfo && robotsInfo.length > 0;
+    if (await isDirectoryAPackageDirectory(ws.uri)) {
+        return;
     }
 
     // Unfortunately vscode does not have a good way to request multiple inputs at once,
@@ -695,13 +735,15 @@ export async function createRobot() {
 
     if (!actionResultListRobotTemplatesInternal.success) {
         feedbackRobocorpCodeError("ACT_LIST_ROBOT_TEMPLATE");
-        window.showErrorMessage("Unable to list Robot templates: " + actionResultListRobotTemplatesInternal.message);
+        window.showErrorMessage(
+            "Unable to list Task Package templates: " + actionResultListRobotTemplatesInternal.message
+        );
         return;
     }
     let availableTemplates: RobotTemplate[] = actionResultListRobotTemplatesInternal.result;
     if (!availableTemplates) {
         feedbackRobocorpCodeError("ACT_NO_ROBOT_TEMPLATE");
-        window.showErrorMessage("Unable to create Robot (the Robot templates could not be loaded).");
+        window.showErrorMessage("Unable to create Task Package (the Task Package templates could not be loaded).");
         return;
     }
 
@@ -709,7 +751,7 @@ export async function createRobot() {
         availableTemplates.map((robotTemplate) => robotTemplate.description),
         {
             "canPickMany": false,
-            "placeHolder": "Please select the template for the Robot.",
+            "placeHolder": "Please select the template for the Task Package.",
             "ignoreFocusOut": true,
         }
     );
@@ -723,22 +765,26 @@ export async function createRobot() {
         return;
     }
 
+    const robotsInWorkspace: boolean = await robotsInWorkspacePromise;
     let useWorkspaceFolder: boolean;
     if (robotsInWorkspace) {
         // i.e.: if we already have robots, this is a multi-Robot workspace.
         useWorkspaceFolder = false;
     } else {
-        const USE_WORKSPACE_FOLDER_LABEL = "Use workspace folder";
+        const USE_WORKSPACE_FOLDER_LABEL = "Use workspace folder (recommended)";
         let target = await window.showQuickPick(
             [
-                { "label": USE_WORKSPACE_FOLDER_LABEL, "detail": "The workspace will only have a single Robot." },
                 {
-                    "label": "Use child folder in workspace",
-                    "detail": "Multiple Robots can be created in this workspace.",
+                    "label": USE_WORKSPACE_FOLDER_LABEL,
+                    "detail": "The workspace will only have a single Task Package.",
+                },
+                {
+                    "label": "Use child folder in workspace (advanced)",
+                    "detail": "Multiple Task Packages can be created in this workspace.",
                 },
             ],
             {
-                "placeHolder": "Where do you want to create the Robot?",
+                "placeHolder": "Where do you want to create the Task Package?",
                 "ignoreFocusOut": true,
             }
         );
@@ -754,7 +800,7 @@ export async function createRobot() {
     if (!useWorkspaceFolder) {
         let name: string = await window.showInputBox({
             "value": "Example",
-            "prompt": "Please provide the name for the Robot folder name.",
+            "prompt": "Please provide the name for the Task Package (Robot) folder name.",
             "ignoreFocusOut": true,
         });
         if (!name) {
@@ -765,71 +811,22 @@ export async function createRobot() {
     }
 
     // Now, let's validate if we can indeed create a Robot in the given folder.
-    let dirUri = vscode.Uri.file(targetDir);
-    let directoryExists = true;
-    try {
-        let stat = await vscode.workspace.fs.stat(dirUri); // this will raise if the directory doesn't exist.
-        if (stat.type == FileType.File) {
-            window.showErrorMessage(
-                "It's not possible to create a Robot in: " +
-                    ws.uri.fsPath +
-                    " because this points to a file which already exists (please erase this file and retry)."
-            );
-            return;
-        }
-    } catch (err) {
-        // ok, directory does not exist
-        directoryExists = false;
-    }
-    let force: boolean = false;
-    if (directoryExists) {
-        let isEmpty: boolean = true;
-        try {
-            // The directory already exists, let's see if it's empty (if it's not we need to check
-            // whether to force the creation of the Robot).
-            let dirContents: [string, FileType][] = await vscode.workspace.fs.readDirectory(dirUri);
-            for (const element of dirContents) {
-                if (element[0] != ".vscode") {
-                    // If there's just a '.vscode', proceed, otherwise,
-                    // we need to ask the user about overwriting it.
-                    isEmpty = false;
-                    break;
-                } else {
-                    force = true;
-                }
-            }
-        } catch (error) {
-            logError("Error reading contents of directory: " + dirUri, error, "ACT_CREATE_ROBOT_LIST_TARGET");
-        }
-        if (!isEmpty) {
-            const CANCEL = "Cancel Robot Creation";
-            // Check if the user wants to override the contents.
-            let target = await window.showQuickPick(
-                [
-                    {
-                        "label": "Create Robot anyways",
-                        "detail": "The Robot will be created and conflicting files will be overwritten.",
-                    },
-                    {
-                        "label": CANCEL,
-                        "detail": "No changes will be done.",
-                    },
-                ],
-                {
-                    "placeHolder": "The directory is not empty. How do you want to proceed?",
-                    "ignoreFocusOut": true,
-                }
-            );
-
-            if (!target || target["label"] == CANCEL) {
-                // Operation cancelled.
-                return;
-            }
+    const op = await verifyIfPathOkToCreatePackage(targetDir);
+    let force: boolean;
+    switch (op) {
+        case "force":
             force = true;
-        }
+            break;
+        case "empty":
+            force = false;
+            break;
+        case "cancel":
+            return;
+        default:
+            throw Error("Unexpected result: " + op);
     }
 
-    OUTPUT_CHANNEL.appendLine("Creating Robot at: " + targetDir);
+    OUTPUT_CHANNEL.appendLine("Creating Task Package (Robot) at: " + targetDir);
     let createRobotResult: ActionResult<any> = await commands.executeCommand(
         roboCommands.ROBOCORP_CREATE_ROBOT_INTERNAL,
         { "directory": targetDir, "template": selectedRobotTemplate.name, "force": force }
@@ -841,15 +838,79 @@ export async function createRobot() {
         } catch (error) {
             logError("Error refreshing file explorer.", error, "ACT_REFRESH_FILE_EXPLORER");
         }
-        window.showInformationMessage("Robot successfully created in:\n" + targetDir);
+        window.showInformationMessage("Task Package (Robot) successfully created in:\n" + targetDir);
     } else {
-        OUTPUT_CHANNEL.appendLine("Error creating Robot at: " + targetDir);
+        OUTPUT_CHANNEL.appendLine("Error creating Task Package (Robot) at: " + targetDir);
         window.showErrorMessage(createRobotResult.message);
     }
 }
 
 export async function updateLaunchEnvironment(args): Promise<{ [key: string]: string } | "cancelled"> {
+    OUTPUT_CHANNEL.appendLine(`updateLaunchEnvironment for ${args["targetRobot"]}.`);
+    let newEnv: any;
+    try {
+        newEnv = await updateLaunchEnvironmentPart0(args);
+    } catch (error) {
+        let msg = "It was not possible to build the Robot launch environment for the launch.";
+        if (error && error.message) {
+            msg += ` (${error.message})`;
+        }
+        msg += "See OUTPUT > Robocorp Code for more details.";
+        window.showErrorMessage(msg);
+        logError("Error computing launch env.", error, "ERROR_LAUNCH_ENV");
+        throw error;
+    }
+    if (newEnv !== "cancelled") {
+        try {
+            // Ok, also check for pre-run scripts.
+            const hasPreRunScripts = await commands.executeCommand(roboCommands.ROBOCORP_HAS_PRE_RUN_SCRIPTS_INTERNAL, {
+                "robot": args["targetRobot"],
+            });
+            if (hasPreRunScripts) {
+                OUTPUT_CHANNEL.appendLine(`preRunScripts found for ${args["targetRobot"]}.`);
+                const runPreRunScripts = async () =>
+                    await window.withProgress(
+                        {
+                            location: vscode.ProgressLocation.Notification,
+                            title: "Running preRunScripts (see 'OUTPUT > Robocorp Code' for details).",
+                            cancellable: false,
+                        },
+                        async (
+                            progress: vscode.Progress<{ message?: string; increment?: number }>,
+                            token: vscode.CancellationToken
+                        ): Promise<void> => {
+                            let result = await commands.executeCommand(
+                                roboCommands.ROBOCORP_RUN_PRE_RUN_SCRIPTS_INTERNAL,
+                                {
+                                    "robot": args["targetRobot"],
+                                    "env": newEnv,
+                                }
+                            );
+                            if (result) {
+                                if (!result["success"]) {
+                                    OUTPUT_CHANNEL.show();
+                                    window.showErrorMessage(
+                                        "There was a problem running preRunScripts. See `OUTPUT > Robocorp Code` for more details."
+                                    );
+                                }
+                            }
+                        }
+                    );
+                await runPreRunScripts();
+            } else {
+                OUTPUT_CHANNEL.appendLine(`preRunScripts NOT found for ${args["targetRobot"]}.`);
+            }
+        } catch (error) {
+            logError("Error checking or executing preRunScripts.", error, "ERR_PRE_RUN_SCRIPTS");
+        }
+    }
+    return newEnv;
+}
+
+export async function updateLaunchEnvironmentPart0(args): Promise<{ [key: string]: string } | "cancelled"> {
     let robot = args["targetRobot"];
+    // Note: the 'robot' may not be the robot.yaml, it may be a .robot or a .py
+    // which is about to be launched (the robot.yaml must be derived from it).
     let environment: { [key: string]: string } = args["env"];
     if (!robot) {
         throw new Error("robot argument is required.");
@@ -873,6 +934,9 @@ export async function updateLaunchEnvironment(args): Promise<{ [key: string]: st
     // - Work items
 
     let newEnv: { [key: string]: string } = { ...environment };
+    for (const [key, val] of envVarsForOutViewIntegration) {
+        newEnv[key] = val;
+    }
 
     let vaultInfoActionResult: ActionResult<IVaultInfo> = await commands.executeCommand(
         roboCommands.ROBOCORP_GET_CONNECTED_VAULT_WORKSPACE_INTERNAL
@@ -905,6 +969,7 @@ export async function updateLaunchEnvironment(args): Promise<{ [key: string]: st
     );
 
     if (!workItemsActionResult || !workItemsActionResult.success) {
+        OUTPUT_CHANNEL.appendLine(`Unable to get work items: ${JSON.stringify(workItemsActionResult)}`);
         return newEnv;
     }
 
@@ -920,8 +985,10 @@ export async function updateLaunchEnvironment(args): Promise<{ [key: string]: st
             roboCommands.ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL,
             {
                 "conda_prefix": condaPrefix,
-                "library": "rpaframework",
-                "version": "11.3",
+                "libs_and_version": [
+                    ["rpaframework", "11.3"],
+                    ["robocorp-workitems", "0.0.1"], // Any version will do
+                ],
             }
         );
     } catch (error) {

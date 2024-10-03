@@ -1,7 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import * as crypto from "crypto";
 import * as pathModule from "path";
 import { XHRResponse, configure as configureXHR, xhr } from "./requestLight";
 import { fileExists, getExtensionRelativeFile } from "./files";
@@ -10,10 +9,17 @@ import { logError, OUTPUT_CHANNEL } from "./channel";
 import { Timing, sleep } from "./time";
 import { execFilePromise, ExecFileReturn, mergeEnviron } from "./subprocess";
 import * as roboConfig from "./robocorpSettings";
-import { runAsAdmin } from "./extensionCreateEnv";
-import { showSubmitIssueUI } from "./submitIssue";
+import { runAsAdminWin32 } from "./extensionCreateEnv";
+import { getProceedwithlongpathsdisabled } from "./robocorpSettings";
+import { GLOBAL_STATE } from "./extension";
 
 let lastPrintedRobocorpHome: string = "";
+
+export enum Metrics {
+    VSCODE_CODE_ERROR = "vscode.code.error",
+    CONVERTER_USED = "vscode.converter.used",
+    CONVERTER_ERROR = "vscode.converter.error",
+}
 
 export async function getRobocorpHome(): Promise<string> {
     let robocorpHome: string = roboConfig.getHome();
@@ -36,7 +42,12 @@ export async function getRobocorpHome(): Promise<string> {
 }
 
 export function createEnvWithRobocorpHome(robocorpHome: string): { [key: string]: string | null } {
-    let env: { [key: string]: string | null } = mergeEnviron({ "ROBOCORP_HOME": robocorpHome });
+    const base = { "ROBOCORP_HOME": robocorpHome };
+    if (getProceedwithlongpathsdisabled()) {
+        base["ROBOCORP_OVERRIDE_SYSTEM_REQUIREMENTS"] = "1";
+    }
+
+    let env: { [key: string]: string | null } = mergeEnviron(base);
     return env;
 }
 
@@ -120,27 +131,33 @@ async function downloadRcc(
             throw new Error("Currently only Linux amd64 is supported.");
         }
     }
-    const RCC_VERSION = "v11.30.0";
+    const RCC_VERSION = "v17.28.4";
     const prefix = "https://downloads.robocorp.com/rcc/releases/" + RCC_VERSION;
     const url: string = prefix + relativePath;
     return await download(url, progress, token, location);
 }
+
+// Note: python tests scan this file and get these constants, so, if the format
+// changes the (failing) test also needs to change.
+const BASENAME_PREBUILT_WIN_AMD64 = "2195c38e27a4ceb6_windows_amd64.zip";
+const BASENAME_PREBUILT_DARWIN = "5522648f69edb3e4_darwin_amd64.zip";
+const BASENAME_PREBUILT_LINUX_AMD64 = "e9c56273fd47ede1_linux_amd64.zip";
 
 function getBaseAsZipBasename() {
     let basename: string;
     if (process.platform == "win32") {
         if (process.arch === "x64" || process.env.hasOwnProperty("PROCESSOR_ARCHITEW6432")) {
             // Check if node is a 64 bit process or if it's a 32 bit process running in a 64 bit processor.
-            basename = "73ec0cb4d0401cae_windows_amd64.zip";
+            basename = BASENAME_PREBUILT_WIN_AMD64;
         } else {
             throw new Error("Currently only Windows amd64 is supported.");
         }
     } else if (process.platform == "darwin") {
-        basename = "ffd79a268d507624_darwin_amd64.zip";
+        basename = BASENAME_PREBUILT_DARWIN;
     } else {
         // Linux
         if (process.arch === "x64") {
-            basename = "db86878da492b41b_linux_amd64.zip";
+            basename = BASENAME_PREBUILT_LINUX_AMD64;
         } else {
             throw new Error("Currently only Linux amd64 is supported.");
         }
@@ -292,11 +309,27 @@ export const STATUS_FATAL = "fatal";
 export const STATUS_FAIL = "fail";
 export const STATUS_WARNING = "warning";
 
+// RCC categories:
+// https://github.com/robocorp/rcc/blob/master/common/categories.go#L4-L14
+
+const CategoryUndefined: number = 0;
+const CategoryLongPath: number = 1010;
+const CategoryLockFile: number = 1020;
+const CategoryLockPid: number = 1021;
+const CategoryPathCheck: number = 1030;
+const CategoryHolotreeShared: number = 2010;
+const CategoryRobocorpHome: number = 3010;
+const CategoryNetworkDNS: number = 4010;
+const CategoryNetworkLink: number = 4020;
+const CategoryNetworkHEAD: number = 4030;
+const CategoryNetworkCanary: number = 4040;
+
 export interface CheckDiagnostic {
     type: string;
     status: string; // ok | fatal | fail | warning
     message: string;
     url: string;
+    category: number; // See CategoryXXX constants above.
 }
 
 export class RCCDiagnostics {
@@ -311,8 +344,28 @@ export class RCCDiagnostics {
 
         for (const check of checks) {
             if (check.status != STATUS_OK) {
+                if (check.status === STATUS_WARNING) {
+                    if (check.category === CategoryLockFile || check.category === CategoryLockPid) {
+                        // We ignore warnings for Locks because they may happen as part of the
+                        // regular operation (because RCC may leave those around as leftovers when RCC
+                        // is killed).
+                        continue;
+                    }
+                }
+
+                if (check.category === CategoryLockFile) {
+                    // We ignore all errors related to lock files (even errors)
+                    // due to: https://github.com/robocorp/rcc/issues/43
+                    // -- Running rcc.exe config diagnostics in a clean machine gives errors related to locks.
+                    continue;
+                }
+
+                if (check.category === CategoryLongPath) {
+                    // We deal with long paths as a part of the startup process.
+                    continue;
+                }
                 this.failedChecks.push(check);
-                if (check.type == "RPA" && check.message.indexOf("ROBOCORP_HOME") != -1) {
+                if (check.category === CategoryRobocorpHome) {
                     this.roboHomeOk = false;
                 }
             }
@@ -331,32 +384,58 @@ export async function runConfigDiagnostics(
     rccLocation: string,
     robocorpHome: string | undefined
 ): Promise<RCCDiagnostics | undefined> {
+    let configureLongpathsOutput: ExecFileReturn | undefined = undefined;
+    let timing = new Timing();
     try {
-        let timing = new Timing();
         let env = mergeEnviron({ "ROBOCORP_HOME": robocorpHome });
-        let configureLongpathsOutput: ExecFileReturn = await execFilePromise(
+        configureLongpathsOutput = await execFilePromise(
             rccLocation,
             ["configure", "diagnostics", "-j", "--controller", "RobocorpCode"],
             { env: env }
         );
+        let outputAsJSON = JSON.parse(configureLongpathsOutput.stdout);
+        let checks: CheckDiagnostic[] = outputAsJSON.checks;
+        let details: Map<string, string> = outputAsJSON.details;
+
+        const ret = new RCCDiagnostics(checks, details);
+
+        // Ok, we've been able to parse the JSON. Let's print the output in a format that's not
+        // difficult to visually parse afterwards.
+        OUTPUT_CHANNEL.appendLine("RCC Diagnostics:");
+        for (const [key, value] of Object.entries(outputAsJSON)) {
+            if (key === "checks") {
+                OUTPUT_CHANNEL.appendLine("  RCC Checks:");
+                for (const check of checks) {
+                    OUTPUT_CHANNEL.appendLine(
+                        `    ${check.type.padEnd(10)} - ${check.status.padEnd(7)} - ${check.message} (${
+                            check.category
+                        })`
+                    );
+                }
+            } else if (key === "details") {
+                OUTPUT_CHANNEL.appendLine("  RCC Details:");
+                for (const [detailsKey, detailsValue] of Object.entries(details)) {
+                    OUTPUT_CHANNEL.appendLine(`    ${detailsKey.padEnd(40)} - ${detailsValue}`);
+                }
+            } else {
+                OUTPUT_CHANNEL.appendLine(`  RCC ${JSON.stringify(key)}:`);
+                // We didn't expect this, let's just print it as json.
+                OUTPUT_CHANNEL.appendLine(`    ${JSON.stringify(value)}`);
+            }
+        }
+        return ret;
+    } catch (error) {
+        logError("Error getting RCC diagnostics.", error, "RCC_DIAGNOSTICS");
         OUTPUT_CHANNEL.appendLine(
             "RCC Diagnostics:" +
                 "\nStdout:\n" +
                 configureLongpathsOutput.stdout +
                 "\nStderr:\n" +
-                configureLongpathsOutput.stderr +
-                "\nTook " +
-                timing.getTotalElapsedAsStr() +
-                " to obtain diagnostics."
+                configureLongpathsOutput.stderr
         );
-
-        let outputAsJSON = JSON.parse(configureLongpathsOutput.stdout);
-        let checks: CheckDiagnostic[] = outputAsJSON.checks;
-        let details: Map<string, string> = outputAsJSON.details;
-        return new RCCDiagnostics(checks, details);
-    } catch (error) {
-        logError("Error getting RCC diagnostics.", error, "RCC_DIAGNOSTICS");
         return undefined;
+    } finally {
+        OUTPUT_CHANNEL.appendLine("\nTook " + timing.getTotalElapsedAsStr() + " to obtain diagnostics.");
     }
 }
 
@@ -499,7 +578,7 @@ export async function feedback(name: string, value: string = "+1") {
 }
 
 export async function feedbackRobocorpCodeError(errorCode: string) {
-    await feedbackAnyError("vscode.code.error", errorCode);
+    await feedbackAnyError(Metrics.VSCODE_CODE_ERROR, errorCode);
 }
 
 const reportedErrorCodes = new Set();
@@ -507,24 +586,89 @@ const reportedErrorCodes = new Set();
 /**
  * Submit feedback on some predefined error code.
  *
- * @param errorSource Something as "vscode.code.error"
+ * @param errorType Something as "vscode.code.error"
  * @param errorCode The error code to be shown.
  */
-export async function feedbackAnyError(errorSource: string, errorCode: string) {
+export async function feedbackAnyError(errorType: string, errorCode: string) {
+    if (!errorCode) {
+        return;
+    }
     // Make sure that only one error is reported per error code.
-    const errorCodeKey = `${errorSource}.${errorCode}`;
+    const errorCodeKey = `${errorType}.${errorCode}`;
     if (reportedErrorCodes.has(errorCodeKey)) {
         return;
     }
     reportedErrorCodes.add(errorCodeKey);
 
     const rccLocation = await getRccLocation();
-    let args: string[] = ["feedback", "metric", "-t", "vscode", "-n", errorSource, "-v", errorCode];
+    let args: string[] = ["feedback", "metric", "-t", "vscode", "-n", errorType, "-v", errorCode];
 
     const robocorpHome = await getRobocorpHome();
     const env = createEnvWithRobocorpHome(robocorpHome);
 
     await execFilePromise(rccLocation, args, { "env": env }, { "hideCommandLine": true });
+}
+
+/**
+ * Note: it's possible that even after enabling this function the holotree isn't shared
+ * if the user doesn't have permissions and can't run as admin.
+ */
+async function enableHolotreeShared(rccLocation: string, env) {
+    const IGNORE_HOLOTREE_SHARED_ENABLE_FAILURE = "IGNORE_HOLOTREE_SHARED_ENABLE_FAILURE";
+
+    try {
+        // Enable the holotree shared mode: this changes permissions so that more than one
+        // user may write to the holotree (usually in C:\ProgramData\robocorp\ht).
+        try {
+            const execFileReturn: ExecFileReturn = await execFilePromise(
+                rccLocation,
+                ["holotree", "shared", "--enable", "--once"],
+                { "env": env },
+                { "showOutputInteractively": true }
+            );
+            OUTPUT_CHANNEL.appendLine("Enabled shared holotree");
+        } catch (err) {
+            if (!GLOBAL_STATE.get(IGNORE_HOLOTREE_SHARED_ENABLE_FAILURE)) {
+                if (process.platform == "win32") {
+                    const RETRY_AS_ADMIN = "Retry as admin";
+                    const IGNORE = "Ignore (don't ask again)";
+                    let response = await window.showWarningMessage(
+                        "It was not possible to enable the holotree shared mode. How do you want to proceed?",
+                        {
+                            "modal": true,
+                            "detail":
+                                "It is Ok to ignore if environments won't be shared with other users in this machine.",
+                        },
+                        RETRY_AS_ADMIN,
+                        IGNORE
+                    );
+                    if (response === RETRY_AS_ADMIN) {
+                        await runAsAdminWin32(rccLocation, ["holotree", "shared", "--enable", "--once"], env);
+                    } else if (response === IGNORE) {
+                        await GLOBAL_STATE.update(IGNORE_HOLOTREE_SHARED_ENABLE_FAILURE, true);
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        logError("Error while enabling shared holotree.", err, "ERROR_ENABLE_SHARED_HOLOTREE");
+    }
+}
+
+async function initHolotree(rccLocation: string, env): Promise<boolean> {
+    try {
+        const execFileReturn = await execFilePromise(
+            rccLocation,
+            ["holotree", "init"],
+            { "env": env },
+            { "showOutputInteractively": true }
+        );
+        OUTPUT_CHANNEL.appendLine("Set user to use shared holotree");
+        return true;
+    } catch (err) {
+        logError("Error while initializing shared holotree.", err, "ERROR_INITIALIZE_SHARED_HOLOTREE");
+        return false;
+    }
 }
 
 /**
@@ -535,12 +679,11 @@ export async function feedbackAnyError(errorSource: string, errorCode: string) {
  */
 export async function collectBaseEnv(
     condaFilePath: string,
+    robotCondaHash: string,
     robocorpHome: string | undefined,
     rccDiagnostics: RCCDiagnostics
 ): Promise<IEnvInfo | undefined> {
-    const text: string = (await fs.promises.readFile(condaFilePath, "utf-8")).replace(/(?:\r\n|\r)/g, "\n");
-    const hash = crypto.createHash("sha256").update(text, "utf8").digest("hex");
-    let spaceName = "vscode-base-v01-" + hash.substring(0, 6);
+    let spaceName = "vscode-base-v01-" + robotCondaHash.substring(0, 6);
 
     let robocorpCodePath = path.join(robocorpHome, ".robocorp_code");
     let spaceInfoPath = path.join(robocorpCodePath, spaceName);
@@ -560,76 +703,57 @@ export async function collectBaseEnv(
     }
     const USE_PROGRAM_DATA_SHARED = true;
     if (USE_PROGRAM_DATA_SHARED) {
+        let execFileReturn: ExecFileReturn;
+        const env = createEnvWithRobocorpHome(robocorpHome);
+
         if (!rccDiagnostics.holotreeShared) {
             // i.e.: if the shared mode is still not enabled, enable it, download the
             // base environment .zip and import it.
-            const env = createEnvWithRobocorpHome(robocorpHome);
-            try {
-                let execFileReturn: ExecFileReturn;
+            await enableHolotreeShared(rccLocation, env);
+
+            const holotreeInitOk: boolean = await initHolotree(rccLocation, env);
+            if (holotreeInitOk) {
+                // Download and import into holotree.
+                const zipDownloadLocation = await getBaseAsZipDownloadLocation();
+                let downloadOk: boolean = false;
                 try {
-                    execFileReturn = await execFilePromise(
-                        rccLocation,
-                        ["holotree", "shared", "--enable"],
-                        { "env": env },
-                        { "showOutputInteractively": true }
-                    );
-                    OUTPUT_CHANNEL.appendLine("Enabled shared holotree");
+                    if (!(await fileExists(zipDownloadLocation))) {
+                        await window.withProgress(
+                            {
+                                location: ProgressLocation.Notification,
+                                title: "Download base environment.",
+                                cancellable: false,
+                            },
+                            async (progress, token) => await downloadBaseAsZip(progress, token, zipDownloadLocation)
+                        );
+                    }
+                    downloadOk = await fileExists(zipDownloadLocation);
                 } catch (err) {
-                    let response = await window.showWarningMessage(
-                        "It was not possible to enable the holotree shared mode. How do you want to proceed?",
-                        "Retry as admin",
-                        "Cancel"
-                    );
-                    if (response == "Retry as admin") {
-                        runAsAdmin(rccLocation, ["holotree", "shared", "--enable"], env);
+                    logError("Error while downloading shared holotree.", err, "ERROR_DOWNLOAD_BASE_ZIP");
+                }
+                if (downloadOk) {
+                    try {
+                        let timing = new Timing();
+                        execFileReturn = await execFilePromise(
+                            rccLocation,
+                            ["holotree", "import", zipDownloadLocation],
+                            { "env": env },
+                            { "showOutputInteractively": true }
+                        );
+                        OUTPUT_CHANNEL.appendLine(
+                            "Took: " + timing.getTotalElapsedAsStr() + " to import base holotree."
+                        );
+                    } catch (err) {
+                        logError(
+                            "Error while importing base zip into holotree.",
+                            err,
+                            "ERROR_IMPORT_BASE_ZIP_HOLOTREE"
+                        );
                     }
                 }
-
-                execFileReturn = await execFilePromise(
-                    rccLocation,
-                    ["holotree", "init"],
-                    { "env": env },
-                    { "showOutputInteractively": true }
-                );
-                OUTPUT_CHANNEL.appendLine("Set user to use shared holotree");
-
-                const zipDownloadLocation = await getBaseAsZipDownloadLocation();
-                if (!(await fileExists(zipDownloadLocation))) {
-                    await window.withProgress(
-                        {
-                            location: ProgressLocation.Notification,
-                            title: "Download base environment.",
-                            cancellable: false,
-                        },
-                        async (progress, token) => await downloadBaseAsZip(progress, token, zipDownloadLocation)
-                    );
-                }
-                let timing = new Timing();
-                execFileReturn = await execFilePromise(
-                    rccLocation,
-                    ["holotree", "import", zipDownloadLocation],
-                    { "env": env },
-                    { "showOutputInteractively": true }
-                );
-                OUTPUT_CHANNEL.appendLine("Took: " + timing.getTotalElapsedAsStr() + " to import base holotree.");
-            } catch (err) {
-                logError("Error while enabling shared holotree.", err, "ERROR_ENABLE_SHARED_HOLOTREE");
             }
         }
     }
-
-    // If the robot is located in a directory that has '/devdata/env.json', we must automatically
-    // add the -e /path/to/devdata/env.json.
-
-    let robotDirName = pathModule.dirname(condaFilePath);
-    let envFilename = pathModule.join(robotDirName, "devdata", "env.json");
-    let args = ["holotree", "variables", "--space", spaceName, "--json", condaFilePath];
-    if (await fileExists(envFilename)) {
-        args.push("-e");
-        args.push(envFilename);
-    }
-    args.push("--controller");
-    args.push("RobocorpCode");
 
     let envArray = undefined;
     try {
@@ -659,6 +783,19 @@ export async function collectBaseEnv(
 
     // If the env array is undefined, compute it now and cache the info to be reused later.
     if (!envArray) {
+        // If the robot is located in a directory that has '/devdata/env.json', we must automatically
+        // add the -e /path/to/devdata/env.json.
+
+        let robotDirName = pathModule.dirname(condaFilePath);
+        let envFilename = pathModule.join(robotDirName, "devdata", "env.json");
+        let args = ["holotree", "variables", "--space", spaceName, "--json", condaFilePath];
+        if (await fileExists(envFilename)) {
+            args.push("-e");
+            args.push(envFilename);
+        }
+        args.push("--controller");
+        args.push("RobocorpCode");
+
         let execFileReturn: ExecFileReturn = await execFilePromise(
             rccLocation,
             args,

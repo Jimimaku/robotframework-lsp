@@ -12,7 +12,6 @@ from typing import (
     Type,
     Iterable,
     Tuple,
-    Sequence,
 )
 from typing import TypeVar
 import typing
@@ -36,6 +35,7 @@ if typing.TYPE_CHECKING:
     from robocorp_ls_core.lsp import CompletionsResponseTypedDict
     from robocorp_ls_core.lsp import CompletionResolveResponseTypedDict
     from robocorp_ls_core.lsp import TextDocumentItem
+    from robocorp_ls_core.lsp import TextEditTypedDict
 
 # Hack so that we don't break the runtime on versions prior to Python 3.8.
 if sys.version_info[:2] < (3, 8):
@@ -46,7 +46,6 @@ if sys.version_info[:2] < (3, 8):
     class TypedDict(object):
         def __init_subclass__(self, *args, **kwargs):
             pass
-
 
 else:
     from typing import Protocol
@@ -159,16 +158,31 @@ class CommunicationDropped(object):
 
 
 class IMessageMatcher(Generic[T], Protocol):
-
     event: threading.Event
     msg: T
 
 
 class IIdMessageMatcher(Generic[T], Protocol):
-
     message_id: str
     event: threading.Event
     msg: T
+
+
+class IResultMessage(TypedDict):
+    jsonrpc: str  # Literal["2.0"] (not available on python 3.7)
+    id: int
+    result: Any
+
+
+class IErrorTypedDict(TypedDict):
+    code: int
+    message: str
+
+
+class IErrorMessage(TypedDict):
+    jsonrpc: str  # Literal["2.0"] (not available on python 3.7)
+    id: int
+    error: IErrorTypedDict
 
 
 COMMUNICATION_DROPPED = CommunicationDropped()
@@ -201,7 +215,6 @@ class IRequestHandler(Protocol):
 
 
 class ILanguageServerClientBase(IRequestCancellable, Protocol):
-
     on_message: "Callback"
 
     def request_async(self, contents: Dict) -> Optional[IIdMessageMatcher]:
@@ -229,9 +242,11 @@ class ILanguageServerClientBase(IRequestCancellable, Protocol):
         contents,
         timeout: Union[int, Sentinel] = Sentinel.USE_DEFAULT_TIMEOUT,
         default: Any = COMMUNICATION_DROPPED,
-    ):
+    ) -> Union[IResultMessage, IErrorMessage]:
         """
         :param contents:
+            {"jsonrpc": "2.0", "id": msg_id, "method": method_name, "params": params}
+
         :param timeout:
         :return:
             The returned message if everything goes ok.
@@ -242,9 +257,26 @@ class ILanguageServerClientBase(IRequestCancellable, Protocol):
             (including if the communication was dropped).
         """
 
+    def request_sync(self, method, **params):
+        """
+        This API is is a bit simpler than the `request` as it builds the message
+        internally.
+
+        It's the same thing as:
+
+            return self.request(
+                {
+                    "jsonrpc": "2.0",
+                    "id": self.next_id(),
+                    "method": method,
+                    "params": params,
+                }
+            )
+        """
+
     def obtain_pattern_message_matcher(
         self, message_pattern: Dict[str, str], remove_on_match: bool = True
-    ) -> IMessageMatcher:
+    ) -> Optional[IMessageMatcher]:
         """
         Can be used as:
 
@@ -300,20 +332,6 @@ class IRobotFrameworkApiClient(ILanguageServerClientBase, Protocol):
     def open(self, uri, version, source):
         pass
 
-    def request_section_name_complete(
-        self, doc_uri, line, col
-    ) -> Optional[IIdMessageMatcher]:
-        """
-        :Note: async complete.
-        """
-
-    def request_keyword_complete(
-        self, doc_uri, line, col
-    ) -> Optional[IIdMessageMatcher]:
-        """
-        :Note: async complete.
-        """
-
     def request_complete_all(
         self, doc_uri, line, col
     ) -> Optional[IIdMessageMatcher["CompletionsResponseTypedDict"]]:
@@ -368,6 +386,13 @@ class IRobotFrameworkApiClient(ILanguageServerClientBase, Protocol):
         """
 
     def request_folding_range(self, doc_uri: str) -> Optional[IIdMessageMatcher]:
+        """
+        :Note: async complete.
+        """
+
+    def request_on_type_formatting(
+        self, doc_uri: str, ch: str, line: int, col: int
+    ) -> Optional[IIdMessageMatcher]:
         """
         :Note: async complete.
         """
@@ -430,6 +455,17 @@ class IRobotFrameworkApiClient(ILanguageServerClientBase, Protocol):
         """
         :Note: async complete.
         """
+
+
+class EvaluatableExpressionTypedDict(TypedDict):
+    """
+    Note: this is actually a custom message return:
+
+    "robot/provideEvaluatableExpression"
+    """
+
+    range: "RangeTypedDict"
+    expression: Optional[str]
 
 
 class ITestInfoTypedDict(TypedDict):
@@ -513,6 +549,14 @@ class ILanguageServerClient(ILanguageServerClientBase, Protocol):
             The uri for the request.
         """
 
+    def request_code_action(
+        self, uri: str, line: int, col: int, endline: int, endcol: int
+    ):
+        """
+        :param uri:
+            The uri for the request.
+        """
+
     def find_definitions(self, uri, line: int, col: int):
         """
         :param uri:
@@ -550,6 +594,11 @@ class ILanguageServerClient(ILanguageServerClientBase, Protocol):
     def request_folding_range(self, uri: str):
         pass
 
+    def request_on_type_formatting(
+        self, uri: str, ch: str, line: int, col: int
+    ) -> "Optional[List[TextEditTypedDict]]":
+        pass
+
     def request_selection_range(
         self, doc_uri: str, positions: List["PositionTypedDict"]
     ):
@@ -569,6 +618,11 @@ class ILanguageServerClient(ILanguageServerClientBase, Protocol):
 
     def request_prepare_rename(self, uri: str, line: int, col: int):
         pass
+
+    def request_provide_evaluatable_expression(
+        self, uri: str, line: int, col: int
+    ):  # -> "Response(dict) with EvaluatableExpressionTypedDict (result)"
+        pass  # Note: not part of the language server spec (custom request).
 
     def request_workspace_symbols(self, query: Optional[str] = None):
         pass
@@ -697,7 +751,6 @@ class IDirCache(Protocol):
 
 
 class IDocumentSelection(Protocol):
-
     doc: "IDocument"
     line: int
     col: int
@@ -859,7 +912,6 @@ class ActionResultDict(TypedDict):
 
 
 class ActionResult(Generic[T]):
-
     success: bool
     message: Optional[
         str
@@ -883,7 +935,6 @@ class ActionResult(Generic[T]):
 
 
 class RCCActionResult(ActionResult[str]):
-
     # A string-representation of the command line.
     command_line: str
 

@@ -5,6 +5,7 @@ import { ROBOCORP_SUBMIT_ISSUE } from "./robocorpCommands";
 import { TREE_VIEW_ROBOCORP_CLOUD_TREE } from "./robocorpViews";
 import { getWorkspaceDescription } from "./ask";
 import { logError } from "./channel";
+import { ActionResult, IAccountInfo, IVaultInfo } from "./protocols";
 
 export class CloudTreeDataProvider implements vscode.TreeDataProvider<CloudEntry> {
     private _onDidChangeTreeData: vscode.EventEmitter<CloudEntry | null> = new vscode.EventEmitter<CloudEntry | null>();
@@ -17,8 +18,11 @@ export class CloudTreeDataProvider implements vscode.TreeDataProvider<CloudEntry
     }
 
     private async _fillRoots(ret: CloudEntry[]) {
-        let accountInfoResult: ActionResult<IAccountInfo> = await vscode.commands.executeCommand(
+        const accountInfoResult: ActionResult<IAccountInfo> = await vscode.commands.executeCommand(
             roboCommands.ROBOCORP_GET_LINKED_ACCOUNT_INFO_INTERNAL
+        );
+        const profileListResultPromise: Thenable<ActionResult<any>> = vscode.commands.executeCommand(
+            roboCommands.ROBOCORP_PROFILE_LIST_INTERNAL
         );
 
         if (!accountInfoResult.success) {
@@ -45,18 +49,36 @@ export class CloudTreeDataProvider implements vscode.TreeDataProvider<CloudEntry
 
             if (!vaultInfoResult || !vaultInfoResult.success || !vaultInfoResult.result) {
                 ret.push({
-                    "label": "Vault: disconnected.",
+                    "label": "Workspace (vault, storage): disconnected.",
                     "iconPath": "unlock",
-                    "viewItemContextValue": "vaultDisconnected",
+                    "viewItemContextValue": "workspaceDisconnected",
+                    "tooltip": `Connecting to a workspace enables accessing vault and storage settings in the selected workspace.`,
                 });
             } else {
                 const result: IVaultInfo = vaultInfoResult.result;
+                const desc = getWorkspaceDescription(result);
                 ret.push({
-                    "label": "Vault: connected to: " + getWorkspaceDescription(result),
+                    "label": "Workspace: " + desc,
                     "iconPath": "lock",
-                    "viewItemContextValue": "vaultConnected",
+                    "viewItemContextValue": "workspaceConnected",
+                    "tooltip": `Enables access to vault and storage settings in: "${getWorkspaceDescription(result)}"`,
                 });
             }
+        }
+
+        const profileListResult = await profileListResultPromise;
+        if (profileListResult?.success) {
+            ret.push({
+                "label": `Profile: ${profileListResult.result["current"]}`,
+                "iconPath": "person",
+                "viewItemContextValue": "profileItem",
+            });
+        } else {
+            ret.push({
+                "label": `Profile: ${profileListResult.message}`,
+                "iconPath": "person",
+                "viewItemContextValue": "profileItem",
+            });
         }
     }
 
@@ -66,21 +88,12 @@ export class CloudTreeDataProvider implements vscode.TreeDataProvider<CloudEntry
             try {
                 await this._fillRoots(ret);
                 ret.push({
-                    "label": "Robot Development Guide",
+                    "label": "Documentation",
                     "iconPath": "book",
                     "command": {
-                        "title": "Open https://robocorp.com/docs/development-guide",
+                        "title": "Open https://robocorp.com/docs",
                         "command": "vscode.open",
-                        "arguments": [vscode.Uri.parse("https://robocorp.com/docs/development-guide")],
-                    },
-                });
-                ret.push({
-                    "label": "Keyword Libraries Documentation",
-                    "iconPath": "notebook",
-                    "command": {
-                        "title": "Open https://robocorp.com/docs/libraries",
-                        "command": "vscode.open",
-                        "arguments": [vscode.Uri.parse("https://robocorp.com/docs/libraries")],
+                        "arguments": [vscode.Uri.parse("https://robocorp.com/docs")],
                     },
                 });
             } catch (error) {
@@ -120,6 +133,9 @@ export class CloudTreeDataProvider implements vscode.TreeDataProvider<CloudEntry
         treeItem.iconPath = new vscode.ThemeIcon(element.iconPath);
         if (element.viewItemContextValue) {
             treeItem.contextValue = element.viewItemContextValue;
+        }
+        if (element.tooltip) {
+            treeItem.tooltip = element.tooltip;
         }
         return treeItem;
     }

@@ -1,10 +1,9 @@
 import sys
-from typing import Optional, List, Any, TypeVar, Dict, ContextManager, Tuple
 from pathlib import Path
+from typing import Any, ContextManager, Dict, List, Optional, Tuple, TypeVar
 
 # Backward-compatibility imports:
 from robocorp_ls_core.protocols import ActionResult, ActionResultDict  # noqa
-
 
 # Hack so that we don't break the runtime on versions prior to Python 3.8.
 if sys.version_info[:2] < (3, 8):
@@ -15,10 +14,8 @@ if sys.version_info[:2] < (3, 8):
     class TypedDict(object):
         pass
 
-
 else:
-    from typing import Protocol
-    from typing import TypedDict
+    from typing import Protocol, TypedDict
 
 
 class LocalRobotMetadataInfoDict(TypedDict):
@@ -128,6 +125,10 @@ class ListWorkItemsParams(TypedDict):
     increment_output: bool  # Whether a new output folder should be generated (and older ones should be collected).
 
 
+class ListActionsParams(TypedDict):
+    action_package: str  # Path to the action package for which we want the actions (may be just the folder or the package.yaml).
+
+
 class ListWorkspacesActionResultDict(TypedDict):
     success: bool
     message: Optional[
@@ -178,6 +179,19 @@ class UploadNewRobotParamsDict(TypedDict):
     workspaceId: str
     robotName: str
     directory: str
+
+
+class ProfileImportParamsDict(TypedDict):
+    profileUri: str
+
+
+class ProfileSwitchParamsDict(TypedDict):
+    profileName: str
+
+
+class ProfileListResultTypedDict(TypedDict):
+    current: str
+    profiles: dict  # name to description
 
 
 class IRccWorkspace(Protocol):
@@ -268,6 +282,13 @@ class IRcc(Protocol):
         otherwise it returns None.
         """
 
+    def get_robocorp_code_datadir(self) -> Path:
+        """
+        Provides the directory to store info for robocorp code.
+
+        Usually ROBOCORP_HOME/.robocorp_code
+        """
+
     def get_template_names(self) -> ActionResult[List[RobotTemplate]]:
         pass
 
@@ -352,3 +373,26 @@ class IRcc(Protocol):
         i.e.: Something as:
         rcc feedback metric -t vscode -n vscode.cloud.upload.existing -v +1
         """
+
+    def profile_import(self, profile_path: str) -> ActionResult:
+        pass
+
+    def profile_switch(self, profile_name: str) -> ActionResult:
+        pass
+
+    def profile_list(self) -> ActionResult[ProfileListResultTypedDict]:
+        pass
+
+    def configuration_diagnostics(self, robot_yaml, json=True) -> ActionResult[str]:
+        pass
+
+    def configuration_settings(self) -> ActionResult[str]:
+        pass
+
+    def holotree_import(self, zip_file: Path, enable_shared: bool) -> ActionResult[str]:
+        pass
+
+    def holotree_variables(
+        self, robot_yaml: Path, space_name: str, no_build: bool
+    ) -> ActionResult[str]:
+        pass

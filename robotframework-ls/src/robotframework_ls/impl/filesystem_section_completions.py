@@ -90,7 +90,6 @@ def _add_completions_from_dir(
             continue
 
         if matcher.accepts(use_path):
-
             ret.append(
                 _create_completion_item(
                     use_path, sel, token, start_col_offset=sel.col - len(qualifier)
@@ -232,21 +231,21 @@ def get_requisites(completion_context: ICompletionContext) -> Optional[_Requisit
     if token_info is not None:
         # Library
         token = ast_utils.get_library_import_name_token(
-            token_info.node, token_info.token
+            token_info.node, token_info.token, generate_empty_on_eol=True
         )
         if token is not None:
             return _Requisites(token, "library")
 
         # Resource
         token = ast_utils.get_resource_import_name_token(
-            token_info.node, token_info.token
+            token_info.node, token_info.token, generate_empty_on_eol=True
         )
         if token is not None:
             return _Requisites(token, "resource")
 
         # Variable
         token = ast_utils.get_variables_import_name_token(
-            token_info.node, token_info.token
+            token_info.node, token_info.token, generate_empty_on_eol=True
         )
         if token is not None:
             return _Requisites(token, "variables")
@@ -258,11 +257,22 @@ def complete(completion_context: ICompletionContext) -> List[CompletionItemTyped
     Provides the completions for 'Library', 'Resource' and 'Variables' imports.
     """
     try:
-
         requisites = get_requisites(completion_context)
         if requisites is None:
             return []
 
+        return complete_with_requisites(completion_context, requisites)
+
+    except:
+        log.exception()
+
+    return []
+
+
+def complete_with_requisites(
+    completion_context: ICompletionContext, requisites: _Requisites
+) -> List[CompletionItemTypedDict]:
+    try:
         if requisites.is_library:
             return _get_library_completions(completion_context, requisites.token)
 

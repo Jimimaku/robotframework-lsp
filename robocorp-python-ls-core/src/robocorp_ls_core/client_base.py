@@ -18,14 +18,17 @@ log = get_logger(__name__)
 
 
 class _MessageMatcher(object):
-    def __init__(self, remove_on_match=True):
+    def __init__(self, remove_on_match: bool = True) -> None:
         self.event = threading.Event()
         self.msg = None
         self.remove_on_match = remove_on_match
+        self.on_message: Optional[Callback] = None
 
     def notify(self, msg):
         # msg can be None if the communication was finished in the meanwhile.
         self.msg = msg
+        if self.on_message is not None:
+            self.on_message(msg)
         self.event.set()
 
 
@@ -168,7 +171,7 @@ def wait_for_message_matchers(
 
 
 class _ReaderThread(threading.Thread):
-    def __init__(self, reader, on_received_message=None):
+    def __init__(self, reader, on_received_message=None) -> None:
         threading.Thread.__init__(self)
         self.daemon = True
         self.reader = reader
@@ -176,8 +179,8 @@ class _ReaderThread(threading.Thread):
         self._finished = False
 
         # Message matchers.
-        self._id_message_matchers = {}  # msg id-> matcher
-        self._pattern_message_matchers = {}  # id(matcher) -> matcher
+        self._id_message_matchers: dict = {}  # msg id-> matcher
+        self._pattern_message_matchers: dict = {}  # id(matcher) -> matcher
         self._request_handlers: Dict[str, List[IRequestHandler]] = {}
 
         self.on_message = Callback()
@@ -259,7 +262,7 @@ class _ReaderThread(threading.Thread):
 
     def obtain_pattern_message_matcher(
         self, message_pattern: Dict[str, Any], remove_on_match: bool = True
-    ):
+    ) -> Optional[_PatternMessageMatcher]:
         """
         :param message_pattern:
             Obtains a matcher which will be notified when the given message pattern is

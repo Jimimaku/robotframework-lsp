@@ -1,3 +1,339 @@
+
+New in 1.22.3 (2024-05-22)
+-----------------------------
+
+- Improvements when running actions:
+    - Logs will show local variables (ROBOT_ROOT is no longer set).
+    - ROBOT_ARTIFACTS set to a better place for the log.html.
+    - If using `sema4ai-actions 0.7.0` or newer, the results of running an action are printed to the terminal.
+
+
+New in 1.22.2 (2024-05-20)
+-----------------------------
+
+- If `Action Server 0.10.0` onwards is being used, creates a project using the `--template minimal`.
+- In the new project, if the project is not empty and the user agreed to proceed, create the contents even if it means overriding what's there.
+
+New in 1.22.1 (2024-05-04)
+-----------------------------
+
+- `--use-feature=truststore` is no longer added to rcc conda.yaml when using uv.
+
+New in 1.22.0 (2024-05-03)
+-----------------------------
+
+- Updated RCC to `v17.28.4`. 
+
+- Fixed issue in the Caching system for the RCC Python Env. 
+
+- Added command for rebuilding the rcc environment. 
+
+- Added shortcut to the Activities for the task/action package. 
+
+- Added listeners for workspace files that trigger question for user to rebuild env or refresh view
+
+- Activating the Terminal command. Correcting the environment injection to have the proper Python env set up
+
+- Terminal opens CMD Prompt for Windows (environment activation is better)
+
+- Added new param to rcc `--no-pyc-management`.
+
+New in 1.21.0 (2024-04-25)
+-----------------------------
+
+- `sema4ai-actions` is now supported (`robocorp-actions` is still supported, although it's
+  now considered deprecated as `sema4ai-actions` is a drop-in replacement).
+
+New in 1.20.2 (2024-04-23)
+-----------------------------
+
+- Fixed issue where automatically installing browser would fail (on Windows).
+
+New in 1.20.1 (2024-04-12)
+-----------------------------
+
+- New Java Inspector available!
+    - The Java Inspector will be supported only on Windows OS.
+- (Action Package support) Properly supports robocorp-actions 0.2.0 (for linting actions).
+- (Action Package support) When subitems of a task package are selected it's possible that the work-items aren't shown in the package tree.
+- (Action Package support) Preferred action server version is now 0.3.2.
+- Updated dependency versions (to fix CVEs).
+
+New in 1.19.0 (2024-03-12)
+-----------------------------
+
+- New action: `Robocorp Code: Download Action Server` (downloads the latest version of the Action Server).
+
+New in 1.18.0 (2024-02-29)
+-----------------------------
+
+- (Action Package support) `package.yaml` file is now linted.
+- (Action Package support) Hover support to get versions on `package.yaml`.
+- (Action Package support) New action to `Run Action (from Action Package)`
+- (Action Package support) New action to `Debug Action (from Action Package)`
+- (Action Package support) Fixed issue collecting actions as `@action(is_consequential=True)`
+- (Action Package support) It's now possible to create a new Action Package directly from VSCode
+- (Action Package support) Suggests the download of a newer version of the Action Server
+- (Web Inspector) Added the isolated environment to the browser configuration every time the browser is initialized and when it's getting installed
+- (Web Inspector) Fixing the issues on MacOS with the browser getting stuck until user restarts VSCode
+- (Web Inspector) New feature of changing the viewport resolution from the Web Inspector UI
+- (Web Inspector) Updated the vendored `robocorp-browser` to the latest version
+- RCC upgraded to to `v17.18.0`.
+
+New in 1.17.0 (2024-02-23)
+-----------------------------
+
+- Support for Action Packages for the [Action Server](https://robocorp.com/docs/action-server)
+    - Expected support with `package.yaml`, available on action server `0.0.21`.
+    - Download and run action server.
+    - List `@action`s (refresh is not automatic at this point).
+    - Open `@action`.
+    - Note: Task Packages (Robots) will still use `robot.yaml` and `conda.yaml`.
+- Improved Image inspector
+- Fixed issue recognizing `--use-feature=trustore` in the validation of `conda.yaml`.
+
+New in 1.16.0 (2024-02-02)
+-----------------------------
+
+- Added linting for methods marked as `@action`.
+
+
+New in 1.15.1 (2024-01-25)
+-----------------------------
+
+- Fixed issue where using `action-server.yaml` for the action server environment
+  didn't do the semantic checks done for `conda.yaml`.
+
+New in 1.15.0 (2024-01-24)
+-----------------------------
+
+- Accept`action-server.yaml` for the action server environment bootstrap
+  (still requires `robot.yaml` alongside it).
+
+New in 1.14.2 (2024-01-12)
+-----------------------------
+
+- Several improvements to the Robocorp Inspector
+    - Note: First experimental version, looking for feedback!
+- Renaming to the new terminology for the Side Bar
+    - Note: Part of moving to Task Packages & Tasks & Actions
+
+
+New in 1.14.0 (2023-12-21)
+-----------------------------
+
+- New Browser/Windows inspector/recorder available!
+    - Note: First experimental version, looking for feedback!
+- RCC upgraded to to `v17.12.0`.
+
+
+New in 1.12.0 (2023-09-28)
+-----------------------------
+
+- RCC upgraded to to `v16.5.0`.
+- `robocorp-trustore` is now used (so, SSL should use certificates from the machine).
+- `ROBO TASKS OUTPUT` updated:
+    - It's now possible to click icon to show details (so, items without a message are also clickable)
+    - The copy to clipboard button for variables no longer hides variable content.
+
+
+New in 1.11.0 (2023-09-07)
+-----------------------------
+
+- When hovering over conda dependencies in `conda.yaml`, information from conda-forge is shown.
+- Warning if the versions for conda-forge in `conda.yaml` have updates.
+- RCC is now distributed along with `Robocorp Code` (so, it'll no longer be downloaded in the first activation).
+- A warning is no longer shown if a pre-release is available in pypi and the latest version is actually being used already.
+- Fixed issue where a parse exception was shown when a git url was used to install a pip dependency.
+- Fixed issue where a method decorated with `@task_cache` would have code lenses which should only appear to `@task`.
+
+
+New in 1.10.0 (2023-08-21)
+-----------------------------
+
+- RCC upgraded from `v14.6.0` to `v14.15.4`.
+- Information from pypi is shown on hover for pypi packages in `conda.yaml`.
+- Warning if the versions for pypi in `conda.yaml` have updates.
+- Warning if `python` version is not `>= 3.8` in `conda.yaml`
+- Warning if `pip` version is not  `>= 22.0` in `conda.yaml`
+- `ROBO TASKS OUTPUT` updated to latest version:
+    - Support for `robocorp-log 2.7.0`:
+        - `if` statements now create a scope in `log.html` (when the function is not a generator).
+        - If an exception has a cause or context the context/cause is now shown in the log
+          - (i.e.: when an exception is raised from another exception or is raised while handling another exception all exceptions are shown).
+        - `continue` and `break` inside a loop are properly handled.
+        - `continue` and `break` are now shown in the logs.
+        - It's now possible to expand / collapse recursively in `log.html`.
+        - `log.html`: When navigating using left arrow, if the element is already collapsed the parent is focused.
+
+
+New in 1.9.0 (2023-08-04)
+-----------------------------
+
+- If the robot has additional pythonpath entries, set those in the VSCode settings (`python.analysis.extraPaths`).
+- If there's some issue computing the Robot environment for a launch that's now shown in the UI.
+- `ROBO TASKS OUTPUT` updated to latest version (added status level filtering, tree navigation and search).
+- Fixed issue with `preRunScripts` (when target executable is a `.py`, it's searched in the `PATH`).
+- Converter now has DOT as a target language.
+
+
+New in 1.8.1 (2023-08-04)
+-----------------------------
+
+- Fixed issue with `preRunScripts` (launching python now always uses python in the robot target environment).
+
+
+New in 1.8.0 (2023-07-21)
+-----------------------------
+
+- Conversion accelerator now accepts Python as a target language.
+- When linking an account the workspace to connect to is asked right away.
+- The UI now makes it clearer that when connecting a workspace both the vault and the storage work with it.
+- `ROBO TASKS OUTPUT` updated to latest version (needed for seeing failed `assert` statements properly).
+- Fixed issue which could prevent the playwright recorder from opening.
+
+
+New in 1.7.0 (2023-07-12)
+-----------------------------
+
+- Created action to start the Playwright recorder (`Robocorp: Open Playwright Recorder`).
+- Fixed editing of existing locators (used with `rpaframework`).
+
+
+New in 1.6.0 (2023-07-10)
+-----------------------------
+
+- Updated `ROBO TASKS OUTPUT` so that places showing the file/line of messages are now clickable and
+  can be used to open the file location inside of VSCode.
+
+- In the `ROBO TASKS OUTPUT`, it's possible to view log messages along with the terminal
+  output.
+
+
+New in 1.5.0 (2023-07-06)
+-----------------------------
+
+- Fixed issues in `Run Task` / `Debug Task` (launching `robocorp.tasks`):
+    - Robot environment properly used when robot is available.
+    - The input work item is properly selected when available.
+    - If multiple entry points in the same file were available the selected one will be run.
+
+- If a `robot.yaml` has `preRunScripts` they'll be run prior to launching.
+
+- Integrated `ROBO TASKS OUTPUT` view which shows the output of running with `robocorp.tasks`.
+  Note: Requires `robocorp.tasks` version `2.1.1`.
+
+
+New in 1.4.0 (2023-06-22)
+-----------------------------
+
+- When `Robocorp Log` with html target is found on the terminal, properly add option to open the html in the browser.
+- Created code-lenses to `Run Task` and `Debug Task` from `robocorp.tasks`.
+
+
+New in 1.3.2 (2023-06-20)
+-----------------------------
+
+- Improvements in the `Conversion Accelerator` integration.
+
+
+New in 1.3.0 (2023-05-10)
+-----------------------------
+
+- RCC upgraded to `v14.6.0`.
+- Improvements in the `Conversion Accelerator` integration.
+
+
+New in 1.2.0 (2023-03-17)
+-----------------------------
+
+- RCC upgraded to `v13.9.2`.
+- Multiple Inspector improvements (upgraded to `v0.9.1`).
+    _- Critical fix opening inspector a 2nd time.
+- Created action: `Robocorp: Import Profile`.
+- Created action: `Robocorp: Switch Profile`.
+- Showing current profile in Robocorp view.
+
+
+New in 1.1.3 (2023-02-13)
+-----------------------------
+
+- `environmentConfigs` is now properly used in `Robocorp Code` (so, it's possible to use conda freeze files).
+
+
+New in 1.1.0 (2023-02-03)
+-----------------------------
+
+- If the `TEMP` folder being used in the environment is removed the extension properly deals with it.
+- Inspector upgrades:
+    - Browser Actions Recorder: Improvements in performance and other bug fixes.
+    - Browser Actions Recorder: Auto-scroll for the keyword list.
+    - Browser Actions Recorder: Code Editor no longer readonly (note: still indifferent to user changes as it will always update).
+    - Browser Locator: Fixed buttons not displaying if no matches available.
+    - Improved approach to close the browser and app window.
+
+
+New in 1.0.2 (2023-01-18)
+-----------------------------
+
+- Upgrade RCC to `v13.0.1`.
+
+
+New in 1.0.0 (2023-01-16)
+-----------------------------
+
+- `Webview2 Runtime` requirement checked before starting inspector.
+- `Web Recorder (BETA)` is now available.
+    - Records multiple interactions with Browser.
+    - Use `Copy Code` to copy the code for the actions.
+    - Allows post-processing to save the locators in locators.json and use aliases or use the locator directly.
+- RCC was upgraded to `v12.2.0`.
+- Faster Startup (after a successful startup, cached information is used so that subsequent startups are faster).
+- When specifying the timeout for the vault, the token is guaranteed to have that as the minimum value (in previous versions it could reuse it for `75%` of the time, so, a `2h` timeout request could return a `0:30h` minutes token).
+    - Timeout limits are now in place so that the minimum timeout is 5 minutes and maximum is 1 hour (but the token requested may be a bit higher so that the extension can cache it and reuse it for more time).
+    - Note: if a longer timeout is needed for testing, a managed environment such as `Robocorp Control Room` or `Robocorp Assistant` is recommended.
+
+
+New in 0.43.0 (2023-01-05)
+-----------------------------
+
+- New UI for Conversion accelerator from third party RPA to Robocorp Robot.
+- Renamed action to `Conversion Accelerator from third party RPA to Robocorp Robot`.
+
+
+New in 0.42.0 (2022-12-22)
+-----------------------------
+
+- RCC was upgraded to `v11.36.3`.
+- No longer showing warnings regarding locks at startup.
+- It's now possible to proceed even with long paths disabled.
+- New setting: `robocorp.vaultTokenTimeoutInMinutes` can be used to change the timeout for the token used for vault access when launching.
+
+
+New in 0.41.0 (2022-12-13)
+-----------------------------
+
+- RCC was upgraded to `v11.33.2`.
+- Support for launching RCC when target is not the last argument.
+
+
+New in 0.40.2 (2022-12-05)
+-----------------------------
+
+- Fixed regression where `noDebug` was not being properly set in generated launch.
+
+
+New in 0.40.1 (2022-12-03)
+-----------------------------
+
+- Fixed issue enabling long path support on Windows requiring elevated shell.
+
+New in 0.40.0 (2022-12-03)
+-----------------------------
+
+- Robot runs now appear in the `Robot Output` view.
+- Upgrades to robocorp-inspector.
+
 New in 0.39.0 (2022-11-02)
 -----------------------------
 
@@ -24,7 +360,7 @@ New in 0.37.0 (2022-09-14)
 - Improved UI for submit issue.
 - RCC was upgraded to `v11.26.3`.
 - Locators:
-    - `robocorp-inspector` was upgraded to `0.7.1`. 
+    - `robocorp-inspector` was upgraded to `0.7.1`.
     - Added recording functionality to command palette
 
 
@@ -40,8 +376,8 @@ New in 0.35.0 (2022-07-04)
 -----------------------------
 
 - `RCC` was upgraded to to `v11.14.5`.
-- RCC is now configured to put the holotree contents in a location shared by multiple users (which allows 
-  for the import of pre-created environments from a .zip file). 
+- RCC is now configured to put the holotree contents in a location shared by multiple users (which allows
+  for the import of pre-created environments from a .zip file).
 - The base environment created for the extension bootstrap is now imported from a base environment downloaded from .zip
   (which is *much* faster).
 

@@ -49,7 +49,7 @@ def keyword_to_dict(keyword):
     }
 
 
-def test_libspec(libspec_manager, workspace_dir, data_regression):
+def test_libspec(libspec_manager, workspace_dir, data_regression) -> None:
     from robotframework_ls.impl.robot_specbuilder import LibraryDoc
     from robotframework_ls.impl.robot_specbuilder import KeywordDoc
     from typing import List
@@ -91,8 +91,36 @@ def method6():
     keywords: List[KeywordDoc] = library_info.keywords
     data_regression.check([keyword_to_dict(k) for k in keywords])
     assert (
-        int(library_info.specversion) <= 4
+        int(library_info.specversion) <= 6
     ), "Libspec version changed. Check parsing. "
+
+
+def test_libspec_string_source(libspec_manager, workspace_dir, data_regression):
+    from robotframework_ls.impl.robot_specbuilder import LibraryDoc
+    from robotframework_ls.impl.robot_specbuilder import KeywordDoc
+    from typing import List
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl.robot_workspace import RobotDocument
+
+    os.makedirs(workspace_dir)
+    libspec_manager.add_additional_pythonpath_folder(workspace_dir)
+    path = Path(workspace_dir) / "check_lib.py"
+    path.write_text(
+        """
+exec('''
+def method():
+    pass
+''')
+"""
+    )
+
+    uri = uris.from_fs_path(os.path.join(workspace_dir, "case.robot"))
+    library_info: Optional[LibraryDoc] = libspec_manager.get_library_doc_or_error(
+        "check_lib", True, CompletionContext(RobotDocument(uri, ""))
+    ).library_doc
+    assert library_info is not None
+    keywords: List[KeywordDoc] = library_info.keywords
+    data_regression.check([keyword_to_dict(k) for k in keywords])
 
 
 def test_libspec_rest(libspec_manager, workspace_dir, data_regression):

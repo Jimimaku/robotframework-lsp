@@ -12,11 +12,14 @@ from robotframework_ls.impl.robot_lsp_constants import (
     OPTION_ROBOT_CODE_FORMATTER_ROBOTIDY,
     OPTION_ROBOT_CODE_FORMATTER_BUILTIN_TIDY,
 )
-from robocorp_ls_core.lsp import MarkupKind
+from robocorp_ls_core.lsp import MarkupKind, WorkspaceEditTypedDict, TextEditTypedDict
 import typing
 from functools import partial
 import itertools
 import sys
+from robocorp_ls_core.code_units import convert_python_col_to_utf16_code_unit
+from typing import List
+from robotframework_ls.impl.robot_version import get_robot_major_minor_version
 
 
 log = logging.getLogger(__name__)
@@ -39,7 +42,12 @@ def check_diagnostics(language_server, data_regression):
     language_server.change_doc(uri, 2, "*** Invalid Invalid ***")
     assert message_matcher.event.wait(TIMEOUT)
     diag = message_matcher.msg["params"]["diagnostics"]
-    data_regression.check(sort_diagnostics(diag), basename="diagnostics")
+    major, minor = get_robot_major_minor_version()
+    if (major, minor) >= (6, 1):
+        basename = "diagnostics.post.61"
+    else:
+        basename = "diagnostics"
+    data_regression.check(sort_diagnostics(diag), basename=basename)
 
 
 def check_find_definition_data_regression(data_regression, check, basename=None):
@@ -58,6 +66,36 @@ def test_diagnostics(language_server, ws_root_path, data_regression):
         {"settings": {"robot.python.env": env, "robot.lint.robocop.enabled": True}}
     )
     check_diagnostics(language_server, data_regression)
+
+
+def test_diagnostics_unicode(language_server_tcp, ws_root_path, data_regression):
+    language_server = language_server_tcp
+    from robotframework_ls_tests.fixtures import sort_diagnostics
+    from robocorp_ls_core.unittest_tools.fixtures import TIMEOUT
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+
+    uri = "untitled:Untitled-1"
+    message_matcher = language_server.obtain_pattern_message_matcher(
+        {"method": "textDocument/publishDiagnostics"}
+    )
+    language_server.open_doc(uri, 1)
+    assert message_matcher.event.wait(TIMEOUT)
+
+    message_matcher = language_server.obtain_pattern_message_matcher(
+        {"method": "textDocument/publishDiagnostics"}
+    )
+    language_server.change_doc(
+        uri,
+        2,
+        """*** Test Cases ***
+Unicode
+    Log    kangaroo=🦘🦘    level=INFO    er🦘or
+""",
+    )
+    assert message_matcher.event.wait(TIMEOUT)
+    diag = message_matcher.msg["params"]["diagnostics"]
+    data_regression.check(sort_diagnostics(diag))
 
 
 def test_diagnostics_robocop(language_server, ws_root_path, data_regression):
@@ -394,6 +432,56 @@ def test_completions_after_library(
     language_server_tcp: ILanguageServerClient, ws_root_path, data_regression, cases
 ):
     from robocorp_ls_core.workspace import Document
+    from robotframework_ls_tests.fixtures import sort_completions
+    from robotframework_ls.impl import text_utilities
+
+    case1_path = cases.get_path("case1")
+
+    language_server = language_server_tcp
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    language_server.open_doc(uri, 1)
+
+    initial_source = """
+*** Settings ***
+Library    |
+
+*** keywords ***
+Something
+    No Operation
+"""
+    doc = Document("")
+    selected_range = text_utilities.set_doc_source_and_get_range_selected(
+        initial_source, doc
+    )
+
+    language_server.change_doc(uri, 2, doc.source)
+
+    language_server_tcp.settings({"settings": {"robot": {"pythonpath": [case1_path]}}})
+
+    def request_completion():
+        line, col = selected_range.get_end_line_col()
+        completions = language_server.get_completions(uri, line, col)
+        del completions["id"]
+        return completions
+
+    completions = request_completion()["result"]
+    data_regression.check(
+        sort_completions(
+            [
+                x
+                for x in completions
+                if x["label"] not in ("case1_library", "$OPTIONS", "lib1", "lib2")
+            ]
+        )
+    )
+
+
+def test_completions_variable_after_library(
+    language_server_tcp: ILanguageServerClient, ws_root_path, data_regression, cases
+):
+    from robocorp_ls_core.workspace import Document
+    from robotframework_ls_tests.fixtures import sort_completions
 
     case1_path = cases.get_path("case1")
 
@@ -403,7 +491,7 @@ def test_completions_after_library(
     language_server.open_doc(uri, 1)
     contents = """
 *** Settings ***
-Library    """
+Library    curd"""
     language_server.change_doc(uri, 2, contents)
 
     language_server_tcp.settings({"settings": {"robot": {"pythonpath": [case1_path]}}})
@@ -415,7 +503,46 @@ Library    """
         del completions["id"]
         return completions
 
-    assert not request_completion()["result"]
+    data_regression.check(sort_completions(request_completion()["result"]))
+
+
+def test_completions_unicode(
+    language_server_tcp: ILanguageServerClient, ws_root_path, data_regression, cases
+):
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_tcp
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    language_server.open_doc(uri, 1)
+    contents = """*** Test Cases ***
+Unicode
+    Log    kangaroo=🦘🦘    level=INFO    """
+    language_server.change_doc(uri, 2, contents)
+
+    def request_completion():
+        doc = Document("", source=contents)
+        line, col = doc.get_last_line_col()
+        col = convert_python_col_to_utf16_code_unit(doc, line, col)
+        completions = language_server.get_completions(uri, line, col)
+        del completions["id"]
+        return completions
+
+    completions = request_completion()["result"]
+    for completion in completions:
+        if completion["label"] == "console=":
+            break
+    else:
+        raise AssertionError('Could not find "console=" completion.')
+    text_edit = completion["textEdit"]
+    doc = Document("", contents)
+    doc.apply_text_edits([text_edit])
+    assert (
+        doc.source
+        == """*** Test Cases ***
+Unicode
+    Log    kangaroo=🦘🦘    level=INFO    console="""
+    )
 
 
 def test_keyword_completions_prefer_local_library_import(
@@ -528,6 +655,46 @@ List Variable
 
     language_server_tcp.settings(
         {"settings": {"robot": {"loadVariablesFromArgumentsFile": str(filename)}}}
+    )
+
+    doc = Document("", source=contents)
+    line, col = doc.get_last_line_col()
+
+    completions = language_server.get_completions(uri, line, col)
+    labels = [x["label"] for x in completions["result"]]
+    assert "V_NAME" in labels
+    assert "V_NAME1" in labels
+    assert "var2" in labels
+
+
+def test_variablefiles_completions_integrated_using_config(
+    language_server_tcp: ILanguageServerClient, ws_root_path, data_regression, tmpdir
+):
+    filename = tmpdir.join("my.py")
+    filename.write_text(
+        """
+V_NAME='value'
+V_NAME1='value 1'
+var2='value var2'
+""",
+        encoding="utf-8",
+    )
+
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_tcp
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    language_server.open_doc(uri, 1)
+    contents = """
+
+*** Test Cases ***
+List Variable
+    Should Contain    ${"""
+    language_server.change_doc(uri, 2, contents)
+
+    language_server_tcp.settings(
+        {"settings": {"robot": {"loadVariablesFromVariablesFile": str(filename)}}}
     )
 
     doc = Document("", source=contents)
@@ -853,6 +1020,143 @@ def test_find_definition_keywords(
     )
 
 
+def test_find_definition_unicode(
+    language_server_tcp: ILanguageServerClient, ws_root_path
+):
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_tcp
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """
+*** Keywords ***
+Keyword
+    [Arguments]     ${a🦘a}    ${b🦘b}
+    Log     ${b🦘b}"""
+    language_server.open_doc(uri, 1, txt)
+
+    doc = Document("uri", txt)
+    line, col = doc.get_last_line_col()
+    col -= 2
+    col = convert_python_col_to_utf16_code_unit(doc, line, col)
+
+    ret = language_server.find_definitions(uri, line, col)
+    assert ret["result"] == [
+        {
+            "originSelectionRange": {
+                "start": {"character": 14, "line": 4},
+                "end": {"character": 18, "line": 4},
+            },
+            "targetRange": {
+                "start": {"character": 33, "line": 3},
+                "end": {"character": 37, "line": 3},
+            },
+            "targetSelectionRange": {
+                "start": {"character": 33, "line": 3},
+                "end": {"character": 37, "line": 3},
+            },
+            "targetUri": "untitled:Untitled-1",
+        }
+    ]
+
+
+def test_references_unicode(language_server_tcp: ILanguageServerClient, ws_root_path):
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_tcp
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """
+*** Keywords ***
+Keyword
+    [Arguments]     ${a🦘a}    ${b🦘b}
+    Log     ${b🦘b}"""
+    language_server.open_doc(uri, 1, txt)
+
+    doc = Document("uri", txt)
+    line, col = doc.get_last_line_col()
+    col -= 2
+    col = convert_python_col_to_utf16_code_unit(doc, line, col)
+
+    ret = language_server.request_references(uri, line, col, True)
+    result = ret["result"]
+    assert result == [
+        {
+            "uri": "untitled:Untitled-1",
+            "range": {
+                "start": {"line": 4, "character": 14},
+                "end": {"line": 4, "character": 18},
+            },
+        },
+        {
+            "uri": "untitled:Untitled-1",
+            "range": {
+                "start": {"line": 3, "character": 33},
+                "end": {"line": 3, "character": 37},
+            },
+        },
+    ]
+
+
+def test_selection_range_unicode(
+    language_server_tcp: ILanguageServerClient, ws_root_path
+):
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_tcp
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """
+*** Keywords ***
+Keyword
+    Log     ${b🦘b}"""
+    language_server.open_doc(uri, 1, txt)
+
+    doc = Document("uri", txt)
+    line, col = doc.get_last_line_col()
+    col -= 2
+    col = convert_python_col_to_utf16_code_unit(doc, line, col)
+
+    ret = language_server.request_selection_range(
+        uri, [{"line": line, "character": col}]
+    )
+    assert ret["result"] == [
+        {
+            "range": {
+                "start": {"line": 3, "character": 14},
+                "end": {"line": 3, "character": 18},
+            },
+            "parent": {
+                "range": {
+                    "start": {"line": 3, "character": 12},
+                    "end": {"line": 3, "character": 19},
+                },
+                "parent": {
+                    "range": {
+                        "start": {"line": 3, "character": 4},
+                        "end": {"line": 3, "character": 19},
+                    },
+                    "parent": {
+                        "range": {
+                            "start": {"line": 2, "character": 0},
+                            "end": {"line": 3, "character": 19},
+                        },
+                        "parent": {
+                            "range": {
+                                "start": {"line": 1, "character": 0},
+                                "end": {"line": 3, "character": 19},
+                            }
+                        },
+                    },
+                },
+            },
+        }
+    ]
+
+
 def _fix_log_signature(signatures):
     for signature in signatures:
         signature["label"] = signature["label"].replace("repr=DEPRECATED", "repr=False")
@@ -947,6 +1251,49 @@ Log It
     data_regression.check(result)
 
 
+def test_document_highlight_unicode_integrated(
+    language_server_io: ILanguageServerClient, ws_root_path, data_regression
+):
+    from robocorp_ls_core.workspace import Document
+    from robocorp_ls_core.lsp import DocumentHighlightResponseTypedDict
+    from robocorp_ls_core.lsp import DocumentHighlightTypedDict
+
+    language_server = language_server_io
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """
+*** Test Cases ***
+Log It
+    ${a🦘a}    Set Variable    22
+    log    ${a🦘a}"""
+    doc = Document("", txt)
+    language_server.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+
+    ret: DocumentHighlightResponseTypedDict = (
+        language_server.request_text_document_highlight(uri, line, col)
+    )
+    result: DocumentHighlightTypedDict = ret["result"]
+    assert len(result) == 2
+    assert result == [
+        {
+            "range": {
+                "start": {"line": 4, "character": 13},
+                "end": {"line": 4, "character": 17},
+            },
+            "kind": 1,
+        },
+        {
+            "range": {
+                "start": {"line": 3, "character": 6},
+                "end": {"line": 3, "character": 10},
+            },
+            "kind": 1,
+        },
+    ]
+
+
 def test_workspace_symbols_integrated(
     language_server_io: ILanguageServerClient, ws_root_path, data_regression
 ):
@@ -1001,7 +1348,7 @@ Log It
     Log    
 
 *** Task ***
-Log It2
+Log 🦘2
     Log    
 
 """
@@ -1040,6 +1387,36 @@ Log It2
     check_code_lens_data_regression(data_regression, found)
 
 
+def test_provide_evaluatable_expression_var_integrated(
+    language_server_io: ILanguageServerClient, ws_root_path, data_regression
+):
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_io
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    os.makedirs(ws_root_path, exist_ok=True)
+    uri = uris.from_fs_path(os.path.join(ws_root_path, "my.robot"))
+    txt = """*** Test Cases ***
+List Variable
+    Log    ${NA🦘ME}"""
+    language_server.open_doc(uri, 1, txt)
+
+    doc = Document(uri, txt)
+    line, col = doc.get_last_line_col()
+
+    ret = language_server.request_provide_evaluatable_expression(uri, line, col - 2)
+    found = ret["result"]
+    assert found == {
+        "range": {
+            "start": {"line": 2, "character": 13},
+            "end": {"line": 2, "character": 19},
+        },
+        "expression": "${NA🦘ME}",
+    }
+
+
 def test_list_tests_integrated(
     language_server_io: ILanguageServerClient, ws_root_path, data_regression
 ):
@@ -1053,7 +1430,7 @@ Log It
     Log    
 
 *** Task ***
-Log It2
+Log 🦘2
     Log    
 
 """
@@ -1190,6 +1567,126 @@ Keyword
     data_regression.check(ret["result"]["changes"])
 
 
+def test_rename_integrated_unicode(
+    language_server_io: ILanguageServerClient, ws_root_path
+):
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_io
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """
+*** Keywords ***
+Keyword
+    [Arguments]     ${foooo}
+    Log     kangaroo=🦘🦘    level=INFO    ${foooo}
+    Log     kangaroo=🦘🦘    level=INFO    ${foooo}"""
+    language_server.open_doc(uri, 1, txt)
+
+    doc = Document("uri", txt)
+    line, col = doc.get_last_line_col()
+    col -= 2
+    col = convert_python_col_to_utf16_code_unit(doc, line, col)
+
+    ret = language_server.request_rename(uri, line, col - 2, "newName")
+
+    workspace_edit: WorkspaceEditTypedDict = ret["result"]
+
+    changes = workspace_edit["changes"]
+    text_edits: List[TextEditTypedDict] = changes[uri]
+    doc.apply_text_edits(text_edits)
+    expected = txt.replace("${foooo}", "${newName}")
+    assert doc.source == expected
+
+
+def test_rename_integrated_unicode_2(
+    language_server_io: ILanguageServerClient, ws_root_path
+):
+    from robocorp_ls_core.workspace import Document
+
+    language_server = language_server_io
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """*** Test Cases ***
+Unicode
+    ${a🦘a}=    Set Variable    22
+    Log    ${a🦘a}"""
+    language_server.open_doc(uri, 1, txt)
+
+    doc = Document("uri", txt)
+    line, col = doc.get_last_line_col()
+    col -= 3
+    col = convert_python_col_to_utf16_code_unit(doc, line, col)
+
+    ret = language_server.request_prepare_rename(uri, line, col)
+    range_found = ret["result"]
+    assert range_found == {
+        "start": {"line": 3, "character": 13},
+        "end": {"line": 3, "character": 17},
+    }
+
+
+def test_code_action_unicode_integrated(
+    language_server_io: ILanguageServerClient, ws_root_path
+):
+    language_server = language_server_io
+
+    language_server.initialize(ws_root_path, process_id=os.getpid())
+    uri = "untitled:Untitled-1"
+    txt = """*** Test Cases ***
+Unicode
+    Log    a🦘🦘a"""
+    language_server.open_doc(uri, 1, txt)
+
+    line = 2
+    # select a🦘|🦘a|
+    col = 14
+    endcol = 17
+
+    ret = language_server.request_code_action(uri, line, col, line, endcol)
+    found = ret["result"]
+    found = [x for x in found if x["command"]["title"] == "Extract local variable"]
+    assert found == [
+        {
+            "title": "Extract local variable",
+            "kind": "refactor.extract",
+            "command": {
+                "title": "Extract local variable",
+                "command": "robot.applyCodeAction",
+                "arguments": [
+                    {
+                        "apply_snippet": {
+                            "edit": {
+                                "changes": {
+                                    "untitled:Untitled-1": [
+                                        {
+                                            "range": {
+                                                "start": {"line": 2, "character": 0},
+                                                "end": {"line": 2, "character": 0},
+                                            },
+                                            "newText": "    ${${0:variable}}=    Set Variable    🦘a\n",
+                                        },
+                                        {
+                                            "range": {
+                                                "start": {"line": 2, "character": 14},
+                                                "end": {"line": 2, "character": 17},
+                                            },
+                                            "newText": "${${0:variable}}",
+                                        },
+                                    ]
+                                }
+                            },
+                            "label": "Extract local variable",
+                        }
+                    }
+                ],
+            },
+        }
+    ]
+
+
 def test_shadowing_libraries(language_server_io: ILanguageServerClient, workspace_dir):
     from robocorp_ls_core import uris
     from robocorp_ls_core.unittest_tools.fixtures import TIMEOUT
@@ -1236,6 +1733,7 @@ User can call builtin 2
         message_matcher = language_server.obtain_pattern_message_matcher(
             {"method": "textDocument/publishDiagnostics"}
         )
+        assert message_matcher
 
         language_server.open_doc(uri1, 1, text=None)
         assert message_matcher.event.wait(TIMEOUT)
@@ -1245,6 +1743,7 @@ User can call builtin 2
         message_matcher = language_server.obtain_pattern_message_matcher(
             {"method": "textDocument/publishDiagnostics"}
         )
+        assert message_matcher
 
         language_server.open_doc(uri2, 1, text=None)
         assert message_matcher.event.wait(TIMEOUT)
@@ -1328,6 +1827,7 @@ def test_rf_interactive_integrated_basic(
     message_matcher = language_server.obtain_pattern_message_matcher(
         {"method": "interpreter/output"}
     )
+    assert message_matcher
     eval2 = language_server.execute_command(
         ROBOT_INTERNAL_RFINTERACTIVE_EVALUATE,
         [
@@ -1425,6 +1925,7 @@ def check_input():
     message_matcher = language_server.obtain_pattern_message_matcher(
         {"method": "interpreter/output"}
     )
+    assert message_matcher
     language_server.execute_command(
         ROBOT_INTERNAL_RFINTERACTIVE_EVALUATE,
         [{"interpreter_id": 0, "code": "*** Settings ***\nLibrary    ./my_lib.py"}],
@@ -1466,6 +1967,7 @@ Test
     message_matcher = language_server.obtain_pattern_message_matcher(
         {"method": "interpreter/output"}
     )
+    assert message_matcher
 
     language_server.execute_command(
         ROBOT_INTERNAL_RFINTERACTIVE_EVALUATE,
@@ -1499,7 +2001,10 @@ def test_rf_interactive_integrated_hook_robocorp_update_env(
     language_server.initialize(
         workspace_dir,
         process_id=os.getpid(),
-        initialization_options={"pluginsDir": str(plugins_path)},
+        initialization_options={
+            "pluginsDir": str(plugins_path),
+            "integrationOption": "robocorp",
+        },
     )
 
     p = Path(workspace_dir) / "env1" / "caselib1.robot"
@@ -1546,6 +2051,7 @@ def test_rf_interactive_integrated_hook_robocorp_update_env(
                 {"method": "interpreter/output"}
             )
         )
+        assert message_matcher_interpreter_output
 
         def run_in_thread():
             language_server.execute_command(
@@ -1587,7 +2093,6 @@ def test_rf_interactive_integrated_completions(
     language_server_io: ILanguageServerClient,
     rf_interpreter_startup: _RfInterpreterInfo,
 ):
-
     from robotframework_ls.commands import (
         ROBOT_INTERNAL_RFINTERACTIVE_COMPLETIONS,
         ROBOT_INTERNAL_RFINTERACTIVE_RESOLVE_COMPLETION,
@@ -1608,7 +2113,6 @@ def test_rf_interactive_integrated_completions(
 
     for completion in completions["result"]["suggestions"]:
         if completion["label"] == "Log (BuiltIn)":
-
             assert "documentation" not in completion
             completion = language_server.execute_command(
                 ROBOT_INTERNAL_RFINTERACTIVE_RESOLVE_COMPLETION,
@@ -1645,7 +2149,6 @@ def test_rf_interactive_integrated_completions_not_duplicated(
     language_server_io: ILanguageServerClient,
     rf_interpreter_startup: _RfInterpreterInfo,
 ):
-
     from robotframework_ls.commands import ROBOT_INTERNAL_RFINTERACTIVE_COMPLETIONS
     from robocorp_ls_core.lsp import Position
     from robotframework_ls.commands import ROBOT_INTERNAL_RFINTERACTIVE_EVALUATE
@@ -1780,7 +2283,11 @@ def test_rf_interactive_integrated_auto_import_completions(
     documentation = typing.cast(
         MonacoMarkdownStringTypedDict, new_completion_item["documentation"]
     )
-    assert "Adds values to the end of" in documentation["value"]
+
+    # Check for the version where docutils is installed or not.
+    if "Adds `values` to the end of `list`" not in documentation["value"]:
+        assert "Adds values to the end of" in documentation["value"]
+
     new_completion_item["documentation"] = "<replaced_for_test>"
     del new_completion_item["data"]
     check_code_lens_data_regression(data_regression, [new_completion_item])
@@ -1841,6 +2348,11 @@ def test_get_rfls_home_dir(language_server_io: ILanguageServerClient):
 
 
 def test_cancelling_requests(language_server_tcp: ILanguageServerClient, ws_root_path):
+    from robotframework_ls.impl.robot_version import get_robot_major_version
+
+    if get_robot_major_version() <= 3:
+        raise pytest.skip(reason="This test is brittle in RF 3.")
+
     from robocorp_ls_core.workspace import Document
 
     language_server = language_server_tcp

@@ -6,6 +6,10 @@ from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
 from robotframework_ls.constants import NULL
 from robocorp_ls_core.watchdog_wrapper import IFSObserver
 import sys
+from typing import Tuple
+from robocorp_ls_core.protocols import IDocument
+from robocorp_ls_core.lsp import Range
+import weakref
 
 __file__ = os.path.abspath(__file__)  # @ReservedAssignment
 
@@ -127,6 +131,26 @@ def main_module():
     from robotframework_ls import __main__
 
     return __main__
+
+
+@pytest.fixture(autouse=True)
+def check_ws():
+    from robocorp_ls_core.workspace import _VirtualFSThread
+
+    all_created = []
+
+    def after_create(created, *args, **kwargs):
+        all_created.append(weakref.ref(created))
+
+    _VirtualFSThread.on_created.register(after_create)
+    yield
+    for created in all_created:
+        c = created()
+        if c is not None:
+            assert (
+                c._disposed.is_set()
+            ), "_VirtualFSThread not disposed properly in test."
+    all_created = []
 
 
 def pytest_report_header(config):
@@ -273,15 +297,38 @@ class _WorkspaceFixture(object):
             )
         return self._ws
 
+    def dispose(self):
+        if self._ws is not None:
+            self._ws.dispose()
+
     def set_root(self, relative_path, **kwargs):
         path = self._cases.get_path(relative_path)
         self.set_absolute_path_root(path, **kwargs)
+
+    def set_root_writable_dir(self, tmpdir, relative_path, **kwargs):
+        """
+        When using `set_root` a directory which is the same for all runs is used.
+        By using `set_root_writable_dir` the directory is copied to a new place
+        and that's used instead (so, clients may write to that dir).
+
+        :param tmpdir:
+            The pytest tmpdir fixture.
+        """
+        import uuid
+
+        dest = str(tmpdir.join(uuid.uuid4().hex))
+        self._cases.copy_to(relative_path, dest)
+        self.set_absolute_path_root(dest, **kwargs)
 
     def set_absolute_path_root(self, path, **kwargs):
         from robocorp_ls_core import uris
         from robotframework_ls.impl.robot_workspace import RobotWorkspace
 
-        self._ws = RobotWorkspace(uris.from_fs_path(path), self._fs_observer, **kwargs)
+        uri = uris.from_fs_path(path)
+        if self._ws is not None:
+            assert self._ws.root_uri == uri
+        else:
+            self._ws = RobotWorkspace(uri, self._fs_observer, **kwargs)
 
     def get_doc_uri(self, root_relative_path):
         from robocorp_ls_core import uris
@@ -302,10 +349,35 @@ class _WorkspaceFixture(object):
             TextDocumentItem(uri=self.get_doc_uri(root_relative_path), text=text)
         )
 
+    def put_doc_get_line_col(
+        self, root_relative_path: str, text: str
+    ) -> Tuple[IDocument, Range]:
+        """
+        :param root_relative_path:
+            The relative path for the doc to be added.
+
+        :param text:
+            The text which should have a '|' which will be removed and the line,
+            col returned will point to that place.
+
+        :return:
+            doc, selected_range
+        """
+        from robotframework_ls.impl import text_utilities
+        from robocorp_ls_core.lsp import TextDocumentItem
+
+        doc = self.ws.put_document(
+            TextDocumentItem(uri=self.get_doc_uri(root_relative_path), text="")
+        )
+        selected_range = text_utilities.set_doc_source_and_get_range_selected(text, doc)
+        return doc, selected_range
+
 
 @pytest.fixture
 def workspace(cases, remote_fs_observer):
-    return _WorkspaceFixture(cases, remote_fs_observer)
+    ws_fixture = _WorkspaceFixture(cases, remote_fs_observer)
+    yield ws_fixture
+    ws_fixture.dispose()
 
 
 @pytest.fixture
@@ -326,6 +398,13 @@ def sort_diagnostics(diagnostics):
         )
 
     return sorted(diagnostics, key=key)
+
+
+def sort_completions(completions):
+    def key(completion):
+        return completion["label"]
+
+    return sorted(completions, key=key)
 
 
 def check_code_lens_data_regression(data_regression, found, basename=None):
@@ -386,3 +465,13 @@ def remote_library(server_port):
     yield server.server_port
     server.stop()
     server_thread.join()
+
+
+@pytest.fixture
+def debug_cache_deps():
+    from robocorp_ls_core.options import BaseOptions
+
+    original = BaseOptions.DEBUG_CACHE_DEPS
+    BaseOptions.DEBUG_CACHE_DEPS = True
+    yield
+    BaseOptions.DEBUG_CACHE_DEPS = original

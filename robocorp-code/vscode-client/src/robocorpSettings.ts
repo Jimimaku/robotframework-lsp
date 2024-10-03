@@ -19,6 +19,10 @@ export const ROBOCORP_HOME = "robocorp.home";
 export const ROBOCORP_VERIFY_LSP = "robocorp.verifyLSP";
 export const ROBOCORP_AUTO_SET_PYTHON_EXTENSION_INTERPRETER = "robocorp.autoSetPythonExtensionInterpreter";
 export const ROBOCORP_AUTO_SET_PYTHON_EXTENSION_DISABLE_ACTIVATE_TERMINAL = "robocorp.autoSetPythonExtensionDisableActivateTerminal";
+export const ROBOCORP_PROCEED_WITH_LONG_PATHS_DISABLED = "robocorp.proceedWithLongPathsDisabled";
+export const ROBOCORP_VAULT_TOKEN_TIMEOUT_IN_MINUTES = "robocorp.vaultTokenTimeoutInMinutes";
+export const ROBOCORP_CODE_LENS_ROBO_LAUNCH = "robocorp.codeLens.roboLaunch";
+export const ROBOCORP_ACTION_SERVER_LOCATION = "robocorp.actionServer.location";
 
 export function getLanguageServerTcpPort(): number {
     let key = ROBOCORP_LANGUAGE_SERVER_TCP_PORT;
@@ -163,6 +167,66 @@ export function getAutosetpythonextensiondisableactivateterminal(): boolean {
 
 export async function setAutosetpythonextensiondisableactivateterminal(value): Promise<void> {
     let key = ROBOCORP_AUTO_SET_PYTHON_EXTENSION_DISABLE_ACTIVATE_TERMINAL;
+    let i = key.lastIndexOf('.');
+
+    let config = workspace.getConfiguration(key.slice(0, i));
+    await config.update(key.slice(i + 1), value, ConfigurationTarget.Global);
+}
+
+
+export function getProceedwithlongpathsdisabled(): boolean {
+    let key = ROBOCORP_PROCEED_WITH_LONG_PATHS_DISABLED;
+    return get<boolean>(key);
+}
+
+
+export async function setProceedwithlongpathsdisabled(value): Promise<void> {
+    let key = ROBOCORP_PROCEED_WITH_LONG_PATHS_DISABLED;
+    let i = key.lastIndexOf('.');
+
+    let config = workspace.getConfiguration(key.slice(0, i));
+    await config.update(key.slice(i + 1), value, ConfigurationTarget.Global);
+}
+
+
+export function getVaulttokentimeoutinminutes(): number {
+    let key = ROBOCORP_VAULT_TOKEN_TIMEOUT_IN_MINUTES;
+    return get<number>(key);
+}
+
+
+export async function setVaulttokentimeoutinminutes(value): Promise<void> {
+    let key = ROBOCORP_VAULT_TOKEN_TIMEOUT_IN_MINUTES;
+    let i = key.lastIndexOf('.');
+
+    let config = workspace.getConfiguration(key.slice(0, i));
+    await config.update(key.slice(i + 1), value, ConfigurationTarget.Global);
+}
+
+
+export function getCodelensRobolaunch(): boolean {
+    let key = ROBOCORP_CODE_LENS_ROBO_LAUNCH;
+    return get<boolean>(key);
+}
+
+
+export async function setCodelensRobolaunch(value): Promise<void> {
+    let key = ROBOCORP_CODE_LENS_ROBO_LAUNCH;
+    let i = key.lastIndexOf('.');
+
+    let config = workspace.getConfiguration(key.slice(0, i));
+    await config.update(key.slice(i + 1), value, ConfigurationTarget.Global);
+}
+
+
+export function getActionserverLocation(): string {
+    let key = ROBOCORP_ACTION_SERVER_LOCATION;
+    return get<string>(key);
+}
+
+
+export async function setActionserverLocation(value): Promise<void> {
+    let key = ROBOCORP_ACTION_SERVER_LOCATION;
     let i = key.lastIndexOf('.');
 
     let config = workspace.getConfiguration(key.slice(0, i));

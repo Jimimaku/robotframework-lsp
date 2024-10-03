@@ -247,7 +247,7 @@ class SignatureInformation(_Base):
         self,
         label: str,
         documentation: Optional[MarkupContentTypedDict] = None,
-        parameters: List[ParameterInformation] = None,
+        parameters: Optional[List[ParameterInformation]] = None,
     ):
         self.label = label
         self.documentation = documentation
@@ -283,9 +283,17 @@ class SignatureHelp(_Base):
 
 
 class Position(_Base):
-    def __init__(self, line=0, character=0):
-        self.line = line
-        self.character = character
+    def __init__(self, line: int = 0, character: int = 0):
+        self.line: int = line
+        self.character: int = character
+
+    def __getitem__(self, name):
+        # provide tuple-access, not just dict access.
+        if name == 0:
+            return self.line
+        if name == 1:
+            return self.character
+        return getattr(self, name)
 
     def __eq__(self, other):
         return (
@@ -344,8 +352,10 @@ class Position(_Base):
 
 class Range(_Base):
     def __init__(self, start, end):
-        self.start = Position(*start) if start.__class__ in (list, tuple) else start
-        self.end = Position(*end) if end.__class__ in (list, tuple) else end
+        self.start: Position = (
+            Position(*start) if start.__class__ in (list, tuple) else start
+        )
+        self.end: Position = Position(*end) if end.__class__ in (list, tuple) else end
 
     def __eq__(self, other):
         return (
@@ -365,6 +375,9 @@ class Range(_Base):
 
     def is_inside(self, another_range: "Range") -> bool:
         return self.start >= another_range.start and self.end <= another_range.end
+
+    def get_end_line_col(self):
+        return self.end[0], self.end[1]
 
 
 class TextDocumentContentChangeEvent(_Base):
@@ -428,6 +441,13 @@ class RangeTypedDict(TypedDict):
 class LocationTypedDict(TypedDict):
     uri: str
     range: RangeTypedDict
+
+
+class LocationLinkTypedDict(TypedDict):
+    originSelectionRange: RangeTypedDict
+    targetUri: str
+    targetRange: RangeTypedDict
+    targetSelectionRange: RangeTypedDict
 
 
 class TextEditTypedDict(TypedDict):
@@ -525,7 +545,7 @@ class TextDocumentPositionParamsTypedDict(TypedDict, total=False):
     position: PositionTypedDict
 
 
-class DiagnosticsTypedDict(TypedDict):
+class DiagnosticsTypedDict(TypedDict, total=False):
     # The range at which the message applies.
     range: RangeTypedDict
 
@@ -568,6 +588,7 @@ class DiagnosticsTypedDict(TypedDict):
 class TextDocumentContextTypedDict(TypedDict, total=False):
     diagnostics: List[DiagnosticsTypedDict]
     triggerKind: int
+    only: Optional[List[str]]
 
 
 class TextDocumentCodeActionTypedDict(TypedDict):
@@ -784,8 +805,35 @@ class CommandTypedDict(TypedDict, total=False):
     arguments: Optional[list]
 
 
-class DocumentSymbolTypedDict(TypedDict, total=False):
+class CodeActionTypedDict(TypedDict, total=False):
+    # Title of the command, like `save`.
+    title: str
 
+    # The kind of the code action.
+    # Used to filter code actions.
+    kind: Optional[str]
+
+    # The diagnostics that this code action resolves.
+    diagnostics: Optional[List[Any]]  # Optional[List[Diagnostic]]
+
+    # Marks this as a preferred action. Preferred actions are used by the
+    # `auto fix` command and can be targeted by keybindings.
+    #
+    # A quick fix should be marked preferred if it properly addresses the
+    # underlying error. A refactoring should be marked preferred if it is the
+    # most reasonable choice of actions to take.
+    isPreferred: Optional[bool]
+
+    disabled: Optional[bool]
+
+    # The identifier of the actual command handler.
+    edit: Optional[WorkspaceEditTypedDict]
+    command: Optional[CommandTypedDict]
+
+    data: Optional[Any]
+
+
+class DocumentSymbolTypedDict(TypedDict, total=False):
     # The name of this symbol. Will be displayed in the user interface and
     # therefore must not be an empty string or a string only consisting of
     # white spaces.
@@ -820,7 +868,6 @@ class DocumentSymbolTypedDict(TypedDict, total=False):
 
 
 class CodeLensTypedDict(TypedDict, total=False):
-
     # The range in which this code lens is valid. Should only span a single
     # line.
     range: RangeTypedDict
@@ -897,6 +944,7 @@ class WorkspaceEditParamsTypedDict(TypedDict, total=False):
 class LSPMessages(object):
     M_PUBLISH_DIAGNOSTICS = "textDocument/publishDiagnostics"
     M_APPLY_EDIT = "workspace/applyEdit"
+    M_APPLY_SNIPPET = "$/applySnippetWorkspaceEdit"
     M_SHOW_MESSAGE = "window/showMessage"
     M_SHOW_MESSAGE_REQUEST = "window/showMessageRequest"
     M_SHOW_DOCUMENT = "window/showDocument"
@@ -910,6 +958,9 @@ class LSPMessages(object):
 
     def apply_edit_args(self, edit_args: WorkspaceEditParamsTypedDict) -> IFuture:
         return self._endpoint.request(self.M_APPLY_EDIT, params=edit_args)
+
+    def apply_snippet(self, snippet_args) -> IFuture:
+        return self._endpoint.request(self.M_APPLY_SNIPPET, params=snippet_args)
 
     def show_document(self, show_document_args: ShowDocumentParamsTypedDict) -> IFuture:
         return self._endpoint.request(self.M_SHOW_DOCUMENT, params=show_document_args)
@@ -974,6 +1025,11 @@ class ICustomDiagnosticDataUndefinedKeywordTypedDict(TypedDict):
     name: str
 
 
+class ICustomDiagnosticDataUndefinedVariableTypedDict(TypedDict):
+    kind: str  # undefined_variable
+    name: str
+
+
 class ICustomDiagnosticDataUndefinedResourceTypedDict(TypedDict):
     kind: str  # undefined_resource
     name: str
@@ -1000,8 +1056,10 @@ class ICustomDiagnosticDataUnexpectedArgumentTypedDict(TypedDict):
 
 
 class Error(object):
-
     __slots__ = "msg start end severity tags data".split(" ")
+
+    if typing.TYPE_CHECKING:
+        tags: List[int]
 
     def __init__(
         self,
@@ -1040,9 +1098,9 @@ class Error(object):
 
     __str__ = __repr__
 
-    def to_lsp_diagnostic(self):
+    def to_lsp_diagnostic(self) -> DiagnosticsTypedDict:
         tags = getattr(self, "tags", None)
-        ret = {
+        ret: DiagnosticsTypedDict = {
             "range": {
                 "start": {"line": self.start[0], "character": self.start[1]},
                 "end": {"line": self.end[0], "character": self.end[1]},

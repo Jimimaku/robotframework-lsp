@@ -30,7 +30,7 @@ from robotframework_debug_adapter.protocols import (
     IBusyWait,
     IEvaluationInfo,
 )
-from typing import Optional, List, Iterable, Union, Any, Dict, FrozenSet
+from typing import Optional, List, Iterable, Union, Any, Dict, FrozenSet, Tuple
 from robocorp_ls_core.basic import implements
 from robocorp_ls_core.debug_adapter_core.dap.dap_schema import (
     StackFrame,
@@ -46,6 +46,43 @@ from robotframework_ls.impl.robot_constants import (
     ROBOT_AND_TXT_FILE_EXTENSIONS,
 )
 import time
+import sys
+
+_found_major_minor_version = None
+
+
+def _get_robot_naked_version():
+    try:
+        import robot  # noqa
+
+        v = str(robot.get_version(True))
+    except:
+        log.exception("Unable to get robot version.")
+        v = "unknown"
+    return v
+
+
+def get_robot_major_minor_version() -> Tuple[int, int]:
+    global _found_major_minor_version
+    if _found_major_minor_version is not None:
+        return _found_major_minor_version
+
+    robot_version = _get_robot_naked_version()
+
+    major_minor_version = (4, 0)
+    try:
+        if "." in robot_version:
+            split = robot_version.split(".")
+            major_version = int(split[0])
+            minor_version = int(split[1])
+            major_minor_version = _found_major_minor_version = (
+                major_version,
+                minor_version,
+            )
+    except:
+        log.exception("Unable to get robot major/minor version.")
+
+    return major_minor_version
 
 
 @lru_cache(None)
@@ -561,9 +598,7 @@ class _EvaluationInfo(object):
 *** Test Cases ***
 Evaluation
     %s
-""" % (
-            self.expression,
-        )
+""" % (self.expression,)
         model = get_model(s)
         ast_utils.set_localization_info_in_model(model, LocalizationInfo("en"))
         usage_info = list(
@@ -714,8 +749,10 @@ class _RobotDebuggerImpl(object):
             source = obj.source
             if source is None:
                 return "None"
+            if not source:
+                return "<not available>"
 
-            filename, _changed = file_utils.norm_file_to_client(source)
+            filename, _changed = file_utils.norm_file_to_client(str(source))
         except:
             filename = "<Unable to get %s filename>" % (msg,)
             log.exception(filename)
@@ -898,18 +935,14 @@ class _RobotDebuggerImpl(object):
         name = attributes["kwname"]
         args = attributes["args"]
         entry_type = attributes.get("type", "KEYWORD")
-        if attributes.get("status") == "NOT RUN":
-            return
         if not args:
             args = []
-        self._before_run_step(ctx, name, entry_type, lineno, source, args)
+        self._before_run_step(
+            ctx, name, entry_type, lineno, source, args, attributes.get("status")
+        )
 
     # 4.0 versions where the lineno is available on the V2 listener
     def end_keyword_v2(self, name, attributes):
-
-        if attributes.get("status") == "NOT RUN":
-            return
-
         self._after_run_step()
 
     # 3.x versions where the lineno is NOT available on the V2 listener
@@ -932,16 +965,24 @@ class _RobotDebuggerImpl(object):
 
         try:
             lineno = control_flow_stmt.lineno
-            source = control_flow_stmt.source
+            source = self._source_as_str(control_flow_stmt.source)
         except AttributeError:
-            return
+            lineno = -1
+            source = None
 
         try:
             args = control_flow_stmt.args
         except AttributeError:
             args = []
         entry_type = "KEYWORD"
-        self._before_run_step(ctx, name, entry_type, lineno, source, args)
+        self._before_run_step(
+            ctx, name, entry_type, lineno, source, args, status="NOT AVAILABLE"
+        )
+
+    def _source_as_str(self, source):
+        if not source:
+            return source
+        return str(source)
 
     # 3.x versions where the lineno is NOT available on the V2 listener
     def after_control_flow_stmt(self, control_flow_stmt, ctx, *args, **kwargs):
@@ -957,16 +998,19 @@ class _RobotDebuggerImpl(object):
             name = step.__class__.__name__
         try:
             lineno = step.lineno
-            source = step.source
+            source = self._source_as_str(step.source)
         except AttributeError:
-            return
+            lineno = -1
+            source = None
         try:
             args = step.args
         except AttributeError:
             args = []
         ctx = runner._context
         entry_type = "KEYWORD"
-        self._before_run_step(ctx, name, entry_type, lineno, source, args)
+        self._before_run_step(
+            ctx, name, entry_type, lineno, source, args, status="NOT AVAILABLE"
+        )
 
     def after_keyword_runner(self, runner, step, *args, **kwargs):
         self._after_run_step()
@@ -981,16 +1025,19 @@ class _RobotDebuggerImpl(object):
             name = "<Unable to get keyword name>"
         try:
             lineno = step.lineno
-            source = step.source
+            source = self._source_as_str(step.source)
         except AttributeError:
-            return
+            lineno = -1
+            source = None
         try:
             args = step.args
         except AttributeError:
             args = []
         ctx = step_runner._context
         entry_type = "KEYWORD"
-        self._before_run_step(ctx, name, entry_type, lineno, source, args)
+        self._before_run_step(
+            ctx, name, entry_type, lineno, source, args, status="NOT AVAILABLE"
+        )
 
     # 3.x versions where the lineno is NOT available on the V2 listener
     def after_run_step(self, step_runner, step, name=None):
@@ -1010,7 +1057,7 @@ class _RobotDebuggerImpl(object):
             "WHILE",
         )
 
-    def _before_run_step(self, ctx, name, entry_type, lineno, source, args):
+    def _before_run_step(self, ctx, name, entry_type, lineno, source, args, status):
         if entry_type == "KEYWORD":
             self._ignore_failures_in_stack.push(name)
 
@@ -1020,26 +1067,33 @@ class _RobotDebuggerImpl(object):
         if self._is_control_step(entry_type):
             self._stop_on_stack_len += 1
 
-        if source is None or lineno is None:
+        if source and not source.endswith(ROBOT_AND_TXT_FILE_EXTENSIONS):
+            robot_init = os.path.join(source, "__init__.robot")
+            if os.path.exists(robot_init):
+                source = robot_init
+
+        if not source or lineno is None:
             # RunKeywordIf doesn't have a source, so, just show the caller source.
             for entry in reversed(self._stack_ctx_entries_deque):
-                if source is None:
-                    source = entry.source
+                if not source:
+                    source = self._source_as_str(entry.source)
                 if lineno is None:
                     lineno = entry.lineno
                 break
 
-        if not source:
-            return
-        if not source.endswith(ROBOT_AND_TXT_FILE_EXTENSIONS):
-            robot_init = os.path.join(source, "__init__.robot")
-            if os.path.exists(robot_init):
-                source = robot_init
         self._stack_ctx_entries_deque.append(
             _StepEntry(
-                name, lineno, source, args, ctx.variables.current, entry_type, ctx
+                name,
+                lineno,
+                source if source else "<not available>",
+                args,
+                ctx.variables.current,
+                entry_type,
+                ctx,
             )
         )
+        if not source or status == "NOT RUN":
+            return
         if self._skip_breakpoints:
             return
 
@@ -1065,9 +1119,18 @@ class _RobotDebuggerImpl(object):
                         )  # noqa
 
                         curr_vars = ctx.variables.current
+
+                        # API changed in: https://github.com/robotframework/robotframework/commit/27a533e4edf0aebd699c15d7b32a30e76fc7638c
+                        major, minor = get_robot_major_minor_version()
+                        if (major, minor) >= (6, 1):
+                            use_vars_or_store = curr_vars
+                        else:
+                            use_vars_or_store = curr_vars.store
+
                         hit = bool(
                             evaluate_expression(
-                                curr_vars.replace_string(bp.condition), curr_vars.store
+                                curr_vars.replace_string(bp.condition),
+                                use_vars_or_store,
                             )
                         )
                         if not hit:
@@ -1144,19 +1207,71 @@ class _RobotDebuggerImpl(object):
 
     def start_suite(self, data, result):
         self._stack_ctx_entries_deque.append(
-            _SuiteEntry(data.name, data.source, "SUITE")
+            _SuiteEntry(data.name, self._source_as_str(data.source), "SUITE")
         )
 
     def end_suite(self, data, result):
-        self._stack_ctx_entries_deque.pop()
+        self._pop("SUITE", data.name)
+
+    def _pop(self, entry_type, name):
+        if not self._stack_ctx_entries_deque:
+            self._log_critical_stack(
+                f"Robot Debugger Warning: unable to pop {entry_type} - {name} (empty queue)."
+            )
+        else:
+            stack_entry = self._stack_ctx_entries_deque[-1]
+            if stack_entry.entry_type == entry_type and stack_entry.name == name:
+                self._stack_ctx_entries_deque.pop()
+            else:
+                for i, stack_entry in enumerate(
+                    reversed(self._stack_ctx_entries_deque)
+                ):
+                    if (
+                        stack_entry.entry_type == entry_type
+                        and stack_entry.name == name
+                    ):
+                        for _ in range(i):
+                            stack_entry = self._stack_ctx_entries_deque.pop()
+                            self._log_critical_stack(
+                                f"Robot Debugger Warning: {stack_entry.entry_type} - {stack_entry.name} did not have a corresponding pop."
+                            )
+
+                        # The current one (which is a match).
+                        self._stack_ctx_entries_deque.pop()
+                        return
+
+                if entry_type in ("TEST", "SUITE"):
+                    for i, stack_entry in enumerate(
+                        reversed(self._stack_ctx_entries_deque)
+                    ):
+                        if stack_entry.entry_type == entry_type:
+                            for _ in range(i):
+                                stack_entry = self._stack_ctx_entries_deque.pop()
+                                self._log_critical_stack(
+                                    f"Robot Debugger Warning: {stack_entry.entry_type} - {stack_entry.name} did not have a corresponding pop."
+                                )
+
+                            # The current one (which is a partial match).
+                            stack_entry = self._stack_ctx_entries_deque.pop()
+                            self._log_critical_stack(
+                                f"Robot Debugger Warning: {stack_entry.entry_type} - {stack_entry.name} pop just by type. Actual request: {entry_type} - {name}"
+                            )
+                            return
+
+                self._log_critical_stack(
+                    f"Robot Debugger Warning: unable to pop {entry_type} - {name} because it does not match the current top: {stack_entry.entry_type} - {stack_entry.name}"
+                )
+
+    def _log_critical_stack(self, msg):
+        log.critical(msg)
 
     def start_test(self, data, result):
         self._stack_ctx_entries_deque.append(
-            _TestEntry(data.name, data.source, data.lineno, "TEST")
+            _TestEntry(data.name, self._source_as_str(data.source), data.lineno, "TEST")
         )
 
     def end_test(self, data, result):
-        self._stack_ctx_entries_deque.pop()
+        self._pop("TEST", data.name)
 
     def log_message(self, message, skip_error=True):
         from robotframework_debug_adapter.message_utils import (
@@ -1192,7 +1307,7 @@ class _RobotDebuggerImpl(object):
                 if self._stack_ctx_entries_deque:
                     lineno = 0
                     step_entry: _StepEntry = self._stack_ctx_entries_deque[-1]
-                    path = step_entry.source
+                    path = self._source_as_str(step_entry.source)
                     source = Source(path=path)
                     try:
                         lineno = step_entry.lineno
@@ -1274,7 +1389,6 @@ class _RobotDebuggerImpl(object):
 def _patch(
     execution_context_cls, impl, method_name, call_before_method, call_after_method
 ):
-
     original_method = getattr(execution_context_cls, method_name)
 
     @functools.wraps(original_method)

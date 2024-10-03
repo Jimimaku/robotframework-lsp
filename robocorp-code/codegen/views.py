@@ -44,26 +44,50 @@ TREE_VIEW_CONTAINERS = [
         icon="images/robocorp-outline.svg",
         tree_views=[
             TreeView(
-                id="robocorp-robots-tree",
-                name="Robots",
-                contextual_title="Robots",
+                id="robocorp-task-packages-tree",
+                name="Task/Action Packages",
+                contextual_title="Task/Action Packages",
                 menus={
                     # See: https://code.visualstudio.com/api/references/contribution-points#contributes.menus
                     # for targets
                     "view/title": [
                         Menu("robocorp.refreshRobotsView", MenuGroup.NAVIGATION),
-                        Menu("robocorp.createRobot", MenuGroup.NAVIGATION),
+                        Menu(
+                            "robocorp.createTaskOrActionPackage", MenuGroup.NAVIGATION
+                        ),
                     ],
                     "view/item/context": [
+                        # Task run as context menus
                         Menu(
                             "robocorp.robotsViewTaskRun",
-                            MenuGroup.INLINE,
+                            "inline@1",
                             "viewItem == taskItem",
                         ),
                         Menu(
                             "robocorp.robotsViewTaskDebug",
-                            MenuGroup.INLINE,
+                            "inline@2",
                             "viewItem == taskItem",
+                        ),
+                        # Action run as context menus
+                        Menu(
+                            "robocorp.robotsViewActionOpen",
+                            "inline@1",
+                            "viewItem == actionItem",
+                        ),
+                        Menu(
+                            "robocorp.robotsViewActionEditInput",
+                            "inline@2",
+                            "viewItem == actionItem",
+                        ),
+                        Menu(
+                            "robocorp.robotsViewActionRun",
+                            "inline@3",
+                            "viewItem == actionItem",
+                        ),
+                        Menu(
+                            "robocorp.robotsViewActionDebug",
+                            "inline@4",
+                            "viewItem == actionItem",
                         ),
                         # Inline in actions
                         Menu(
@@ -91,7 +115,7 @@ TREE_VIEW_CONTAINERS = [
                             MenuGroup.INLINE,
                             "viewItem == actionsInRobotItem",
                         ),
-                        # Needs right click (duplicating above + new actions)
+                        # Tasks: Needs right click (duplicating above + new actions)
                         Menu(
                             "robocorp.robotsViewTaskRun",
                             MenuGroup.NAVIGATION,
@@ -101,6 +125,27 @@ TREE_VIEW_CONTAINERS = [
                             "robocorp.robotsViewTaskDebug",
                             MenuGroup.NAVIGATION,
                             "viewItem == taskItem",
+                        ),
+                        # Actions: Needs right click (duplicating above + new actions)
+                        Menu(
+                            "robocorp.robotsViewActionRun",
+                            MenuGroup.NAVIGATION,
+                            "viewItem == actionItem",
+                        ),
+                        Menu(
+                            "robocorp.robotsViewActionDebug",
+                            MenuGroup.NAVIGATION,
+                            "viewItem == actionItem",
+                        ),
+                        Menu(
+                            "robocorp.robotsViewActionEditInput",
+                            MenuGroup.NAVIGATION,
+                            "viewItem == actionItem",
+                        ),
+                        Menu(
+                            "robocorp.robotsViewActionOpen",
+                            MenuGroup.NAVIGATION,
+                            "viewItem == actionItem",
                         ),
                         # New action: reveal in explorer.
                         Menu(
@@ -127,9 +172,9 @@ TREE_VIEW_CONTAINERS = [
                 },
             ),
             TreeView(
-                id="robocorp-robot-content-tree",
-                name="Robot Content",
-                contextual_title="Robot Content",
+                id="robocorp-package-content-tree",
+                name="Package Content",
+                contextual_title="Package Content",
                 menus={
                     "view/title": [
                         Menu(
@@ -184,9 +229,9 @@ TREE_VIEW_CONTAINERS = [
                 },
             ),
             TreeView(
-                id="robocorp-resources-tree",
-                name="Resources",
-                contextual_title="Resources",
+                id="robocorp-package-resources-tree",
+                name="Package Resources",
+                contextual_title="Package Resources",
                 menus={
                     "view/item/context": [
                         # Locators (root)
@@ -196,19 +241,19 @@ TREE_VIEW_CONTAINERS = [
                             "robocorp-code:single-robot-selected && viewItem == newBrowserLocator",
                         ),
                         Menu(
-                            "robocorp.newRobocorpInspectorImage",
-                            MenuGroup.INLINE,
-                            "robocorp-code:single-robot-selected && viewItem == newImageLocator",
-                        ),
-                        Menu(
                             "robocorp.newRobocorpInspectorWindows",
                             MenuGroup.INLINE,
                             "robocorp-code:single-robot-selected && viewItem == newWindowsLocator",
                         ),
                         Menu(
-                            "robocorp.newRobocorpInspectorWebRecorder",
+                            "robocorp.newRobocorpInspectorImage",
                             MenuGroup.INLINE,
-                            "robocorp-code:single-robot-selected && viewItem == newWebRecorder",
+                            "robocorp-code:single-robot-selected && viewItem == newImageLocator",
+                        ),
+                        Menu(
+                            "robocorp.newRobocorpInspectorJava",
+                            MenuGroup.INLINE,
+                            "robocorp-code:single-robot-selected && viewItem == newJavaLocator",
                         ),
                         # Locators (root)
                         Menu(
@@ -260,7 +305,7 @@ TREE_VIEW_CONTAINERS = [
             ),
             TreeView(
                 id="robocorp-cloud-tree",
-                name="Robocorp",
+                name="Robocorp Cloud",
                 contextual_title="Robocorp",
                 menus={
                     "view/item/context": [
@@ -280,14 +325,24 @@ TREE_VIEW_CONTAINERS = [
                             when="viewItem == cloudLogoutItem",
                         ),
                         Menu(
-                            "robocorp.connectVault",
+                            "robocorp.connectWorkspace",
                             MenuGroup.INLINE,
-                            when="viewItem == vaultDisconnected",
+                            when="viewItem == workspaceDisconnected",
                         ),
                         Menu(
-                            "robocorp.disconnectVault",
+                            "robocorp.disconnectWorkspace",
                             MenuGroup.INLINE,
-                            when="viewItem == vaultConnected",
+                            when="viewItem == workspaceConnected",
+                        ),
+                        Menu(
+                            "robocorp.profileImport",
+                            MenuGroup.INLINE,
+                            when="viewItem == profileItem",
+                        ),
+                        Menu(
+                            "robocorp.profileSwitch",
+                            MenuGroup.INLINE,
+                            when="viewItem == profileItem",
                         ),
                     ]
                 },
@@ -306,7 +361,16 @@ def get_views_containers():
         }
         for tree_view_container in TREE_VIEW_CONTAINERS
     ]
-    return {"activitybar": activity_bar_contents}
+    return {
+        "activitybar": activity_bar_contents,
+        "panel": [
+            {
+                "id": "robocorp-python-view-output",
+                "title": "Robo Tasks Output",
+                "icon": "$(output)",
+            },
+        ],
+    }
 
 
 def get_tree_views_for_package_json():
@@ -318,6 +382,16 @@ def get_tree_views_for_package_json():
             for tree in tree_view_container.tree_views
             if tree.add_to_package_json
         ]
+
+    ret["robocorp-python-view-output"] = [
+        {
+            "type": "webview",
+            "id": "robocorp.python.view.output",
+            "name": "Robo Tasks Output",
+            "contextualTitle": "Robo Tasks Output",
+        }
+    ]
+
     return ret
 
 

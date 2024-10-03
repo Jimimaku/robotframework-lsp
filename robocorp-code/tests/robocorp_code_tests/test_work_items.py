@@ -1,7 +1,8 @@
+import time
+from pathlib import Path
+
 from robocorp_code_tests.protocols import IRobocorpLanguageServerClient
 from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
-from pathlib import Path
-import time
 
 
 def test_list_work_items(
@@ -10,9 +11,8 @@ def test_list_work_items(
     data_regression,
 ):
     from robocorp_code.commands import ROBOCORP_LIST_WORK_ITEMS_INTERNAL
-    from robocorp_code.protocols import ActionResultDictWorkItems
+    from robocorp_code.protocols import ActionResultDictWorkItems, WorkItemsInfo
     from robocorp_code.robocorp_language_server import RobocorpLanguageServer
-    from robocorp_code.protocols import WorkItemsInfo
 
     client = language_server_initialized
 
@@ -123,8 +123,9 @@ def make_info_relative(work_items_info, robot_parent):
 def test_work_items_removal(
     language_server_initialized: IRobocorpLanguageServerClient, cases: CasesFixture
 ):
-    from robocorp_code.commands import ROBOCORP_LIST_WORK_ITEMS_INTERNAL
     from robocorp_ls_core.basic import wait_for_condition
+
+    from robocorp_code.commands import ROBOCORP_LIST_WORK_ITEMS_INTERNAL
 
     client = language_server_initialized
 
@@ -191,7 +192,7 @@ def test_verify_library_version(
 
     ret = client.execute_command(
         ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL,
-        [{"conda_prefix": str(tmpdir), "library": "rpaframework", "version": "11.1"}],
+        [{"conda_prefix": str(tmpdir), "libs_and_version": [["rpaframework", "11.1"]]}],
     )
     result = ret["result"]
     assert not result["success"]
@@ -215,7 +216,7 @@ def test_verify_library_version(
     for v in ("10", "11", "11.1", "11.1.1", "11.1.2"):
         ret = client.execute_command(
             ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL,
-            [{"conda_prefix": str(tmpdir), "library": "rpaframework", "version": v}],
+            [{"conda_prefix": str(tmpdir), "libs_and_version": [["rpaframework", v]]}],
         )
         result = ret["result"]
         assert result["success"]
@@ -224,8 +225,8 @@ def test_verify_library_version(
     for v in ("12", "11.2", "11.1.3"):
         ret = client.execute_command(
             ROBOCORP_VERIFY_LIBRARY_VERSION_INTERNAL,
-            [{"conda_prefix": str(tmpdir), "library": "rpaframework", "version": v}],
+            [{"conda_prefix": str(tmpdir), "libs_and_version": [["rpaframework", v]]}],
         )
         result = ret["result"]
         assert not result["success"]
-        assert result["result"] == {"library": "rpaframework", "version": "11.1.2"}
+        assert result["result"] == None

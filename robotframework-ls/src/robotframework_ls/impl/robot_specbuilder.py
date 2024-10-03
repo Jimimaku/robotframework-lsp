@@ -181,7 +181,7 @@ class LibraryDoc(object):
         doc_format="",
         source=None,
         lineno=-1,
-    ):
+    ) -> None:
         assert filename
         self.filename = filename
         self.name = name
@@ -192,11 +192,13 @@ class LibraryDoc(object):
         self.scope = scope
         self.named_args = named_args
         self.doc_format = doc_format or "ROBOT"
+        if source and source.startswith("<"):  # Deal with <string>
+            source = None
         self._source = source
         self.lineno = lineno
-        self.inits = []
-        self.keywords = []
-        self.data_types = []
+        self.inits: list = []
+        self.keywords: list = []
+        self.data_types: list = []
 
         self.symbols_cache: Optional[ISymbolsCache] = None
 
@@ -329,7 +331,6 @@ class LibraryDoc(object):
 
 
 class KeywordArg(object):
-
     POSITIONAL_ONLY = "POSITIONAL_ONLY"
     POSITIONAL_ONLY_MARKER = "POSITIONAL_ONLY_MARKER"
     POSITIONAL_OR_NAMED = "POSITIONAL_OR_NAMED"
@@ -483,6 +484,8 @@ class KeywordDoc(object):
         self.doc = doc
         self.tags = tags
         self._shortdoc = ""
+        if source and source.startswith("<"):
+            source = None
         self._source = source
         self.lineno = lineno
 
@@ -508,7 +511,9 @@ class KeywordDoc(object):
 
     @property
     def deprecated(self) -> bool:
-        return self.doc.startswith("*DEPRECATED") and "*" in self.doc[1:]
+        from robotframework_ls.impl.text_utilities import has_deprecated_text
+
+        return has_deprecated_text(self.doc)
 
     @property  # type: ignore
     @instance_cache
@@ -642,10 +647,10 @@ class SpecDocBuilder(object):
 
         if specversion >= 3:
             libdoc.inits = self._create_keywords_v3(
-                weakref.ref(libdoc), spec, "inits/init"
+                weakref.ref(libdoc), spec, "inits/init", specversion
             )
             libdoc.keywords = self._create_keywords_v3(
-                weakref.ref(libdoc), spec, "keywords/kw"
+                weakref.ref(libdoc), spec, "keywords/kw", specversion
             )
             try:
                 libdoc.data_types = self._create_data_types(spec)
@@ -755,7 +760,7 @@ class SpecDocBuilder(object):
     # ===========================================================================
     # V3 handling
     # ===========================================================================
-    def _create_arguments_v3(self, elem):
+    def _create_arguments_v3(self, elem, specversion):
         ret = []
         for arg in elem.findall("arguments/arg"):
             name = arg.find("name")
@@ -774,12 +779,22 @@ class SpecDocBuilder(object):
                 continue
 
             arg_type = arg.find("type")
+            if arg_type is None:
+                use_arg_type = Sentinel
+            else:
+                if specversion >= 6:
+                    # In version 6 onwards the type is actually something as:
+                    # <type name="int" typedoc="integer"/>
+                    use_arg_type = arg_type.get("name")
+                else:
+                    use_arg_type = arg_type.text
+
             arg_default = arg.find("default")
             ret.append(
                 KeywordArg(
                     arg_repr,
                     name,
-                    arg_type.text if arg_type is not None else Sentinel,
+                    use_arg_type,
                     arg_default.text if arg_default is not None else Sentinel,
                     kind=kind,
                 )
@@ -787,14 +802,14 @@ class SpecDocBuilder(object):
 
         return ret
 
-    def _create_keywords_v3(self, weak_libdoc, spec, path):
+    def _create_keywords_v3(self, weak_libdoc, spec, path, specversion):
         ret = []
         for elem in spec.findall(path):
             ret.append(
                 KeywordDoc(
                     weak_libdoc,
                     name=elem.get("name", ""),
-                    args=tuple(self._create_arguments_v3(elem)),
+                    args=tuple(self._create_arguments_v3(elem, specversion)),
                     doc=elem.find("doc").text or "",
                     tags=[t.text for t in elem.findall("tags/tag")],
                     source=elem.get("source"),

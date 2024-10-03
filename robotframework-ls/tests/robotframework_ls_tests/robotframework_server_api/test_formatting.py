@@ -13,7 +13,7 @@ def test_formatting_basic(data_regression):
     )
     from robocorp_ls_core.workspace import Document
 
-    contents = u"""
+    contents = """
 ***Settings***
 [Documentation]Some doc
 
@@ -21,7 +21,7 @@ def test_formatting_basic(data_regression):
 Check
     Call  1  2"""
     new_contents = robot_source_format(contents)
-    assert u"*** Settings ***" in new_contents
+    assert "*** Settings ***" in new_contents
 
     text_edits = create_text_edit_from_diff(contents, new_contents)
 
@@ -57,11 +57,7 @@ Demo2
 
 *** Keywords ***
 Some keyword
-""".replace(
-        "\r\n", "\n"
-    ).replace(
-        "\r", "\n"
-    )
+""".replace("\r\n", "\n").replace("\r", "\n")
 
     api.m_text_document__did_change(
         textDocument={"uri": uri},
@@ -72,3 +68,50 @@ Some keyword
     for _i in range(3):
         changes = api._threaded_code_format({"uri": uri}, None, monitor)
         assert not changes
+
+
+def test_robotframework_formatting_unicode():
+    from robotframework_ls.impl.robot_version import get_robot_major_version
+
+    if get_robot_major_version() <= 3:
+        pytest.skip("Requires robotidy (which needs RF 4 onwards) to work.")
+
+    from robotframework_ls_tests.fixtures import initialize_robotframework_server_api
+    from robocorp_ls_core.jsonrpc.monitor import Monitor
+    from robotframework_ls.impl.robot_lsp_constants import (
+        OPTION_ROBOT_CODE_FORMATTER_ROBOTIDY,
+    )
+    from robotframework_ls.impl.robot_lsp_constants import OPTION_ROBOT_CODE_FORMATTER
+    from robocorp_ls_core.workspace import Document
+
+    api = initialize_robotframework_server_api()
+    api.m_workspace__did_change_configuration(
+        settings={OPTION_ROBOT_CODE_FORMATTER: OPTION_ROBOT_CODE_FORMATTER_ROBOTIDY}
+    )
+    uri = "untitled"
+
+    api.m_text_document__did_open(textDocument={"uri": uri})
+
+    # This should be formatted as expected already!
+    text = """*** Test Cases ***
+Unicode
+    ${mydict} =   Create Dictionary   kangaroo=🦘   egg=🥚""".replace(
+        "\r\n", "\n"
+    ).replace("\r", "\n")
+
+    api.m_text_document__did_change(
+        textDocument={"uri": uri},
+        contentChanges=[{"text": text}],
+    )
+
+    monitor = Monitor()
+    text_edits = api._threaded_code_format({"uri": uri}, None, monitor)
+    doc = Document("", text)
+    doc.apply_text_edits(text_edits)
+    assert (
+        doc.source
+        == """*** Test Cases ***
+Unicode
+    ${mydict} =    Create Dictionary    kangaroo=🦘    egg=🥚
+""".replace("\r\n", "\n").replace("\r", "\n")
+    )

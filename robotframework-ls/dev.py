@@ -91,7 +91,7 @@ class Dev(object):
         import subprocess
 
         # i.e.: Gets the last tagged version
-        cmd = "git describe --tags --abbrev=0 --match robotframework*".split()
+        cmd = "git describe --tags --abbrev=0 --match robotframework-lsp*".split()
         popen = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         stdout, stderr = popen.communicate()
 
@@ -227,7 +227,7 @@ class Dev(object):
         assert os.path.exists(bundle_js), f"{bundle_js} does not exist."
         print("=== Finished vendoring.")
 
-    def remove_robot_stream(self):
+    def remove_robot_out_stream(self):
         import time
         import shutil
 
@@ -235,7 +235,7 @@ class Dev(object):
             os.path.dirname(__file__), "src", "robotframework_ls", "vendored"
         )
         found = []
-        for path in ("robot_stream", "output-webview"):
+        for path in ("robot_out_stream", "output-webview"):
             target = os.path.join(vendored_dir, path)
             try:
                 shutil.rmtree(target)
@@ -248,52 +248,45 @@ class Dev(object):
         time.sleep(0.5)
         return found
 
-    def vendor_robot_stream(self):
+    def vendor_robotframework_output_stream(self):
         """
-        Vendors robot_stream into robotframework_ls/vendored.
+        Vendors robot_out_stream into robotframework_ls/vendored.
         """
         import shutil
         import subprocess
 
-        vendored_src, vendored_webview = self.remove_robot_stream()
-
-        src_core = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "robot-stream",
-            "src",
-            "robot_stream",
-        )
-        print("=== Copying from: %s to %s" % (src_core, vendored_src))
-
-        shutil.copytree(src_core, vendored_src)
-
-        src_webview = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "robot-stream",
-                "output-webview",
-            )
-        )
-        print("=== Yarn install")
-        shell = sys.platform == "win32"
-        subprocess.check_call(["yarn", "install"], cwd=src_webview, shell=shell)
-
-        print("=== Building with webpack in: %s" % (vendored_webview,))
-        subprocess.check_call(
-            ["yarn", "build-prod", "--env", f"target={vendored_webview}"],
-            cwd=src_webview,
-            shell=shell,
+        vendored_dir = os.path.join(
+            os.path.dirname(__file__), "src", "robotframework_ls", "vendored"
         )
 
+        vendored_src, vendored_webview = self.remove_robot_out_stream()
+
+        # Always get the latest version.
+        subprocess.call(
+            [sys.executable]
+            + "-m pip install robotframework-output-stream --no-deps --target .".split(),
+            cwd=vendored_dir,
+        )
+
+        sys.path.insert(0, vendored_src)
+        import index
+
+        sys.path.remove(vendored_src)
+
+        os.makedirs(vendored_webview, exist_ok=True)
+        with open(
+            os.path.join(vendored_webview, "index.html"), "w", encoding="utf-8"
+        ) as stream:
+            stream.write(index.INDEX_HTML_CONTENTS)
+
+        assert os.path.exists(vendored_src), f"{vendored_src} does not exist."
         assert os.path.exists(vendored_webview), f"{vendored_webview} does not exist."
         print(f"Files found in: {vendored_webview}")
         for f in os.listdir(vendored_webview):
             print(f)
 
-        bundle_js = os.path.join(vendored_webview, "bundle.js")
-        assert os.path.exists(bundle_js), f"{bundle_js} does not exist."
+        index_html = os.path.join(vendored_webview, "index.html")
+        assert os.path.exists(index_html), f"{index_html} does not exist."
         print("=== Finished vendoring.")
 
     def fix_readme(self):

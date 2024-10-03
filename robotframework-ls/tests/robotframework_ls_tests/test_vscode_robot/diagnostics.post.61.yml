@@ -1,0 +1,50 @@
+- code: '0204'
+  codeDescription:
+    href: https://robocop.readthedocs.io/en/3.1.1/rules.html#missing-doc-resource-file
+  message: Missing documentation in resource file
+  range:
+    end:
+      character: 0
+      line: 0
+    start:
+      character: 0
+      line: 0
+  severity: 2
+  source: robocop
+- code: 0509
+  codeDescription:
+    href: https://robocop.readthedocs.io/en/3.1.1/rules.html#empty-section
+  message: Section '*** Invalid Invalid ***' is empty
+  range:
+    end:
+      character: 22
+      line: 0
+    start:
+      character: 0
+      line: 0
+  severity: 2
+  source: robocop
+- code: '1002'
+  codeDescription:
+    href: https://robocop.readthedocs.io/en/3.1.1/rules.html#missing-trailing-blank-line
+  message: Missing trailing blank line at the end of file
+  range:
+    end:
+      character: 23
+      line: 0
+    start:
+      character: 0
+      line: 0
+  severity: 2
+  source: robocop
+- message: 'Unrecognized section header ''*** Invalid Invalid ***''. Valid sections:
+    ''Settings'', ''Variables'', ''Keywords'' and ''Comments''.'
+  range:
+    end:
+      character: 23
+      line: 0
+    start:
+      character: 0
+      line: 0
+  severity: 1
+  source: robotframework

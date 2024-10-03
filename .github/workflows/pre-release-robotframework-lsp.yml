@@ -23,13 +23,13 @@ jobs:
     - name: Setup node
       uses: actions/setup-node@v1
       with:
-        node-version: 16.x
+        node-version: 18.x
     - name: Yarn install
       run: yarn install
-    - name: Set up Python 3.7
-      uses: actions/setup-python@v1
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
       with:
-        python-version: 3.7
+        python-version: "3.10"
     - name: Set up JDK 11
       uses: actions/setup-java@v1
       with:
@@ -51,7 +51,7 @@ jobs:
       run: |
         python -m dev vendor-robocorp-ls-core
         python -m dev vendor-robotframework-interactive
-        python -m dev vendor-robot-stream
+        python -m dev vendor-robotframework-output-stream
     - name: Fix README references
       run: python -m dev fix-readme
     - name: Build wheel
@@ -63,19 +63,19 @@ jobs:
     # VSCode (build)
     - run: npm install -g vsce@2.6.7
     - run: vsce package -o robotframework-lsp.vsix
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: robotframework-lsp.vsix
         path: ./robotframework-ls/robotframework-lsp.vsix
 
-    # Intellij (build)  
-    - name: Package
-      working-directory: ./robotframework-intellij
-      run: ./gradlew buildPlugin
-    - uses: actions/upload-artifact@v1
-      with:
-        name: intellij-distribution
-        path: robotframework-intellij/build/distributions/
+    # # Intellij (build)  
+    # - name: Package
+    #   working-directory: ./robotframework-intellij
+    #   run: ./gradlew buildPlugin
+    # - uses: actions/upload-artifact@v4
+    #   with:
+    #     name: intellij-distribution
+    #     path: robotframework-intellij/build/distributions/
 
     # Note: always publish a pre-release to VSCode marketplace.
     - name: Publish pre-release to vscode marketplace

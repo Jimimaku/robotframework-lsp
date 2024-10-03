@@ -1,13 +1,9 @@
-import pytest
+from pathlib import Path
+import time
 from typing import Dict, List
 
-
-def apply_completion(doc, completion):
-    text_edit = completion["textEdit"]
-    additional_text_edits = completion["additionalTextEdits"]
-    assert additional_text_edits
-    doc.apply_text_edits([text_edit])
-    doc.apply_text_edits(additional_text_edits)
+import pytest
+from .common import apply_completion
 
 
 def test_completion_with_auto_import_basic_stdlib(
@@ -46,6 +42,127 @@ Library    Collections
 *** Test Cases ***
 User can call library
     Copy Dictionary"""
+    )
+
+
+def test_completion_with_auto_import_disabled(
+    workspace, cases, libspec_manager, workspace_dir
+):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl import auto_import_completions
+    from robotframework_ls.robot_config import RobotConfig
+    from robotframework_ls.impl.robot_generated_lsp_constants import (
+        OPTION_ROBOT_COMPLETIONS_KEYWORDS_NOT_IMPORTED_ENABLE,
+    )
+
+    cases.copy_to("case1", workspace_dir)
+    config = RobotConfig()
+    config.update({OPTION_ROBOT_COMPLETIONS_KEYWORDS_NOT_IMPORTED_ENABLE: False})
+
+    workspace.set_root(workspace_dir, libspec_manager=libspec_manager)
+    doc = workspace.put_doc("case1.robot")
+
+    doc.source = """
+*** Settings ***
+Library    case1_library
+
+*** Test Cases ***
+User can call library
+    Copy Diction"""
+
+    completions = auto_import_completions.complete(
+        CompletionContext(doc, workspace=workspace.ws, config=config), {}
+    )
+
+    assert len(completions) == 0
+
+
+def test_completion_with_auto_import_dont_add_import(
+    workspace, cases, libspec_manager, workspace_dir
+):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl import auto_import_completions
+    from robotframework_ls.robot_config import RobotConfig
+    from robotframework_ls.impl.robot_generated_lsp_constants import (
+        OPTION_ROBOT_COMPLETIONS_KEYWORDS_NOT_IMPORTED_ADD_IMPORT,
+    )
+
+    cases.copy_to("case1", workspace_dir)
+    config = RobotConfig()
+    config.update({OPTION_ROBOT_COMPLETIONS_KEYWORDS_NOT_IMPORTED_ADD_IMPORT: False})
+
+    workspace.set_root(workspace_dir, libspec_manager=libspec_manager)
+    doc = workspace.put_doc("case1.robot")
+
+    doc.source = """
+*** Settings ***
+Library    case1_library
+
+*** Test Cases ***
+User can call library
+    Copy Diction"""
+
+    completions = auto_import_completions.complete(
+        CompletionContext(doc, workspace=workspace.ws, config=config), {}
+    )
+
+    assert len(completions) == 1
+    apply_completion(doc, completions[0], expect_additional_text_edits=False)
+
+    assert (
+        doc.source
+        == """
+*** Settings ***
+Library    case1_library
+
+*** Test Cases ***
+User can call library
+    Copy Dictionary"""
+    )
+
+
+def test_completion_with_auto_import_dont_prefix_library(
+    workspace, cases, libspec_manager, workspace_dir
+):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl import auto_import_completions
+    from robotframework_ls.robot_config import RobotConfig
+    from robotframework_ls.impl.robot_generated_lsp_constants import (
+        OPTION_ROBOT_COMPLETIONS_KEYWORDS_PREFIX_IMPORT_NAME,
+    )
+
+    cases.copy_to("case1", workspace_dir)
+    config = RobotConfig()
+    config.update({OPTION_ROBOT_COMPLETIONS_KEYWORDS_PREFIX_IMPORT_NAME: True})
+
+    workspace.set_root(workspace_dir, libspec_manager=libspec_manager)
+    doc = workspace.put_doc("case1.robot")
+
+    doc.source = """
+*** Settings ***
+Library    case1_library
+
+*** Test Cases ***
+User can call library
+    Copy Diction"""
+
+    completions = auto_import_completions.complete(
+        CompletionContext(doc, workspace=workspace.ws, config=config), {}
+    )
+
+    assert len(completions) == 1
+    apply_completion(doc, completions[0])
+
+    assert (
+        doc.source
+        == """
+*** Settings ***
+Library    case1_library
+Library    Collections
+
+*** Test Cases ***
+User can call library
+    Collections.Copy Dictionary"""
     )
 
 
@@ -318,6 +435,79 @@ User can call library
     # As the Collections library is already there, don't show that completion here
     # (it's already managed in other completions).
     assert len(completions) == 0
+
+
+def test_completion_with_auto_import_lib_deprecated_not_shown(
+    workspace, libspec_manager, tmpdir
+):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl import auto_import_completions
+    from robocorp_ls_core.basic import wait_for_expected_func_return
+    from robocorp_ls_core import uris
+    import os
+
+    workspace.set_root_writable_dir(
+        tmpdir, "case2", libspec_manager=libspec_manager, index_workspace=True
+    )
+    myliburi = workspace.get_doc_uri("mylib.py")
+    libspec_manager.add_workspace_folder(os.path.dirname(myliburi))
+
+    path = Path(uris.to_fs_path(myliburi))
+    path.write_text(
+        """
+class mylib(object):
+    'some doc'
+    def methodfromlib(self):
+        'ok'
+""",
+        "utf-8",
+    )
+
+    doc = workspace.put_doc(
+        "case2.robot",
+        """
+*** Test Cases ***
+User can call library
+    Methodfromli""",
+    )
+
+    libdoc = libspec_manager.get_library_doc_or_error(
+        "mylib", True, CompletionContext(doc, workspace=workspace.ws)
+    )
+    assert "*DEPRECATED*" not in libdoc.library_doc.doc
+
+    wait_for_expected_func_return(
+        lambda: len(
+            auto_import_completions.complete(
+                CompletionContext(doc, workspace=workspace.ws), {}
+            )
+        ),
+        1,
+    )
+    time.sleep(1)
+    path.write_text(
+        """
+class mylib(object):
+    '*DEPRECATED*'
+    def methodfromlib(self):
+        'ok'
+""",
+        "utf-8",
+    )
+
+    libdoc = libspec_manager.get_library_doc_or_error(
+        "mylib", True, CompletionContext(doc, workspace=workspace.ws)
+    )
+    assert "*DEPRECATED*" in libdoc.library_doc.doc
+
+    wait_for_expected_func_return(
+        lambda: len(
+            auto_import_completions.complete(
+                CompletionContext(doc, workspace=workspace.ws), {}
+            )
+        ),
+        0,
+    )
 
 
 def test_completion_with_auto_import_resource_import(workspace, setup_case2_in_dir_doc):

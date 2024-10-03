@@ -7,6 +7,7 @@ import threading
 import pytest
 
 from robotframework_interactive.interpreter import RobotFrameworkInterpreter
+from robotframework_interactive.robot_version import get_robot_major_version
 
 
 USE_TIMEOUTS = True
@@ -123,6 +124,46 @@ My Keyword
     assert "MyKeywordCalled" in interpreter.stream_stdout.getvalue()
 
 
+@pytest.mark.skipif(
+    get_robot_major_version() < 5, reason="RETURN only available in RF 5 onwards."
+)
+def test_print_result(interpreter: _InterpreterInfo, tmpdir):
+    interpreter.interpreter.evaluate(
+        """
+*** Keywords ***
+My Keyword
+    ${var}=    Evaluate    123
+    RETURN    ${var}
+"""
+    )
+    interpreter.interpreter.evaluate("My Keyword")
+    assert "123" in interpreter.stream_stdout.getvalue()
+
+
+def test_print_variable(interpreter: _InterpreterInfo):
+    interpreter.interpreter.evaluate("${var}=    Evaluate    123")
+    v = interpreter.stream_stdout.getvalue()
+
+    if get_robot_major_version() <= 3:
+        expected_count = 0
+    else:
+        expected_count = 1
+
+    assert v.count("123") == expected_count, f"Found: {v}"
+
+    interpreter.interpreter.evaluate("${var}")
+    v = interpreter.stream_stdout.getvalue()
+    assert v.count("123") == expected_count + 1, f"Found: {v}"
+
+    interpreter.interpreter.evaluate("${notthere}")
+    v = interpreter.stream_stdout.getvalue()
+    assert v.count("123") == expected_count + 1, f"Found: {v}"
+    assert "notthere" not in v
+
+    v = interpreter.stream_stderr.getvalue()
+    assert "Variable '${notthere}' not found." in v
+
+
 def test_variables_import(interpreter: _InterpreterInfo, tmpdir):
     tmpdir.join("my_vars.py").write_text(
         """
@@ -200,7 +241,7 @@ Some Test
 """
     )
 
-    test_suite = TestSuite.from_model(model)
+    test_suite = TestSuite.from_model(model, name="MySuite")
 
     stdout = StringIO()
     test_suite.run(output=os.path.abspath("output.xml"), stdout=stdout)

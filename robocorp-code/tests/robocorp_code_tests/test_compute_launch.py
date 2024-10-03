@@ -1,3 +1,6 @@
+from robocorp_ls_core import uris
+
+
 def test_compute_launch_robot(tmpdir):
     from robocorp_code import compute_launch
 
@@ -42,9 +45,9 @@ ignoreFiles:
             "type": "robotframework-lsp",
             "name": "Launch name",
             "request": "launch",
-            "target": str(tmpdir),
+            "target": "<target-in-args>",
             "cwd": str(tmpdir),
-            "args": [],
+            "args": [str(tmpdir)],
             "terminal": "integrated",
             "internalConsoleOptions": "neverOpen",
         },
@@ -92,9 +95,9 @@ ignoreFiles:
             "type": "robotframework-lsp",
             "name": "Launch name",
             "request": "launch",
-            "target": d,
+            "target": "<target-in-args>",
             "cwd": str(tmpdir),
-            "args": ["task name"],
+            "args": [d, "task name"],
             "terminal": "integrated",
             "internalConsoleOptions": "neverOpen",
         },
@@ -141,7 +144,7 @@ ignoreFiles:
             "type": "robotframework-lsp",
             "name": "Launch name",
             "request": "launch",
-            "target": str(tmpdir),
+            "target": "<target-in-args>",
             "cwd": str(tmpdir),
             "args": [
                 "--report",
@@ -152,6 +155,7 @@ ignoreFiles:
                 "Task log",
                 "--task",
                 "my Task",
+                str(tmpdir),
             ],
             "terminal": "integrated",
             "internalConsoleOptions": "neverOpen",
@@ -161,6 +165,7 @@ ignoreFiles:
 
 def test_compute_launch_01(tmpdir):
     import os
+
     from robocorp_code import compute_launch
 
     robot_yaml = tmpdir.join("robot.yaml")
@@ -215,6 +220,7 @@ ignoreFiles:
 
 def test_compute_launch_02(tmpdir):
     import os
+
     from robocorp_code import compute_launch
 
     robot_yaml = tmpdir.join("robot.yaml")
@@ -311,6 +317,7 @@ ignoreFiles:
 
 def test_compute_launch_04(tmpdir):
     import os
+
     from robocorp_code import compute_launch
 
     robot_yaml = tmpdir.join("robot.yaml")
@@ -424,3 +431,89 @@ ignoreFiles:
             "internalConsoleOptions": "neverOpen",
         },
     }
+
+
+def test_compute_launch_action_package_01(tmpdir):
+    import os
+
+    from robocorp_code import compute_launch
+
+    package_yaml = tmpdir.join("package.yaml")
+    my_action_file = tmpdir.join("my_action.py")
+    input_json = tmpdir.join("input.json")
+
+    my_action_file.write(
+        """
+from robocorp.actions import action
+
+@action
+def my_action(arg1: str) -> str:
+    return arg1
+"""
+    )
+
+    package_yaml.write(
+        """
+# Required: A description of what's in the action package.
+description: Action package description
+
+# Required: A link to where the documentation on the package lives.
+documentation: https://github.com/...
+
+dependencies:
+  conda-forge:
+  - python=3.10.12
+  - pip=23.2.1
+  - robocorp-truststore=0.8.0
+  pypi:
+  - robocorp-actions=0.0.7
+"""
+    )
+
+    input_json.write(
+        """
+{"arg1": "value"}
+"""
+    )
+
+    additional_pythonpath_entries = []
+    launch = compute_launch.compute_robot_launch_from_robocorp_code_launch(
+        "Launch name",
+        "launch",
+        None,
+        None,
+        additional_pythonpath_entries,
+        None,
+        "python_executable.exe",
+        package=str(package_yaml),
+        action_name="my_action",
+        uri=uris.from_fs_path(str(tmpdir.join("my_action.py"))),
+        json_input=str(input_json),
+    )
+
+    cwd = str(tmpdir)
+    launch["result"]["program"] = os.path.basename(launch["result"]["program"])
+    expected = {
+        "success": True,
+        "message": None,
+        "result": {
+            "type": "python",
+            "name": "Launch name",
+            "request": "launch",
+            "cwd": cwd,
+            "program": "launch_actions.py",
+            "args": [
+                "run",
+                "--action",
+                "my_action",
+                "--json-input",
+                os.path.join(cwd, "input.json"),
+                # May change drive case:
+                uris.to_fs_path(uris.from_fs_path(os.path.join(cwd, "my_action.py"))),
+            ],
+            "console": "integratedTerminal",
+            "internalConsoleOptions": "neverOpen",
+            "python": "python_executable.exe",
+        },
+    }
+    assert launch == expected

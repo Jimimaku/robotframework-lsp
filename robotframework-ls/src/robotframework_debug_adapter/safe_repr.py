@@ -21,14 +21,8 @@ from robocorp_ls_core.robotframework_log import get_logger
 log = get_logger(__name__)
 
 # Py3 compat - alias unicode to str, and xrange to range
-try:
-    unicode  # noqa
-except NameError:
-    unicode = str
-try:
-    xrange  # noqa
-except NameError:
-    xrange = range
+unicode = str
+xrange = range
 
 
 class SafeRepr(object):
@@ -41,31 +35,14 @@ class SafeRepr(object):
     # String types are truncated to maxstring_outer when at the outer-
     # most level, and truncated to maxstring_inner characters inside
     # collections.
-    maxstring_outer = 2 ** 16
+    maxstring_outer = 2**16
     maxstring_inner = 30
-    if sys.version_info >= (3, 0):
-        string_types = (str, bytes)
-        bytes = bytes
-        set_info = (set, "{", "}", False)
-        frozenset_info = (frozenset, "frozenset({", "})", False)
-        int_types = (int,)
-        long_iter_types = (list, tuple, bytearray, range, dict, set, frozenset)
-    else:
-        string_types = (str, unicode)
-        bytes = str
-        set_info = (set, "set([", "])", False)
-        frozenset_info = (frozenset, "frozenset([", "])", False)
-        int_types = (int, long)  # noqa
-        long_iter_types = (
-            list,
-            tuple,
-            bytearray,
-            xrange,
-            dict,
-            set,
-            frozenset,
-            buffer,
-        )  # noqa
+    string_types = (str, bytes)
+    bytes = bytes
+    set_info = (set, "{", "}", False)
+    frozenset_info = (frozenset, "frozenset({", "})", False)
+    int_types = (int,)
+    long_iter_types = (list, tuple, bytearray, range, dict, set, frozenset)
 
     # Collection types are recursively iterated for each limit in
     # maxcollection.
@@ -99,7 +76,7 @@ class SafeRepr(object):
 
     # All other types are treated identically to strings, but using
     # different limits.
-    maxother_outer = 2 ** 16
+    maxother_outer = 2**16
     maxother_inner = 30
 
     convert_to_hex = False
@@ -215,9 +192,7 @@ class SafeRepr(object):
                     size = None
                 if size is not None and size > self.maxcollection[level]:
                     return True
-                return any(
-                    (self._is_long_iter(item, level + 1) for item in obj)
-                )  # noqa
+                return any((self._is_long_iter(item, level + 1) for item in obj))  # noqa
             return any(
                 i > self.maxcollection[level] or self._is_long_iter(item, level + 1)
                 for i, item in enumerate(obj)
@@ -403,9 +378,7 @@ class SafeRepr(object):
                 obj_repr = object.__repr__(obj)
             except Exception:
                 try:
-                    obj_repr = (
-                        "<no repr available for " + type(obj).__name__ + ">"
-                    )  # noqa
+                    obj_repr = "<no repr available for " + type(obj).__name__ + ">"  # noqa
                 except Exception:
                     obj_repr = "<no repr available for object>"
 

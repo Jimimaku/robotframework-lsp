@@ -1,3 +1,102 @@
+New in 1.11.0 (2023-06-07)
+-----------------------------
+
+### New features
+
+- `Robot Framework 6.1.0` is now supported.
+- `ignore_git_dir=True` is now used by default in the `robotframework-tidy` integration.
+- Bundled `robotframework-tidy` upgraded to `4.3.0`.
+- Bundled `robotframework-robocop` upgraded to `3.1.1`.
+
+
+
+New in 1.10.0 (2023-04-12)
+-----------------------------
+
+### New features
+
+- Variables in variable subscript are now properly found. [#889](https://github.com/robocorp/robotframework-lsp/issues/889)
+
+### Bugfixes
+
+- If the user completes something as `$var`, complete to `${variable}` instead of `$${variable}`.
+
+
+New in 1.9.0 (2023-02-03)
+-----------------------------
+
+### New features
+
+- Improve `IF`/`WHILE`/`Run Keyword If` snippet completions to make it a bit clearer that python expressions are expected.
+- `robot.libraries.blacklist` can be used to blacklist libraries which should never appear in code-completion.
+- Deprecated libraries:
+    - `robot.libraries.deprecated` can be used to mark libraries as deprecated.
+    - Keywords from deprecated libraries will not appear in the auto-import code-completion (so, they'll only be available if the `Library` is added to the `Settings`).
+    - Libraries which start with `*DEPRECATED*` in its doc are also considered deprecated.
+    - Keywords from libraries marked as deprecated will be shown as deprecated.
+- Requesting completions right after `Libraries   ` without any additional name will show completions for all known (pre-loaded) libraries.
+- Completions for variables are shown without having to enter `$` nor `${`.
+
+
+### Bugfixes
+
+- Properly report about undefined variable in `RETURN`. [#865](https://github.com/robocorp/robotframework-lsp/issues/865)
+- References to variables used in `Evaluate` arguments are now properly collected.
+- Don't show completion for the variable being currently defined in variable assign. 
+
+
+New in 1.8.0 (2023-01-23)
+-----------------------------
+
+### Bugfixes
+
+- Text ranges when dealing with emoji unicode characters are now correct. [#862](https://github.com/robocorp/robotframework-lsp/issues/862)  
+- Code analysis fix:  An arguments with a name with '=' must match a star arg with the full name if the name was already found (in RF keyword and not python method). [#860](https://github.com/robocorp/robotframework-lsp/issues/860)
+
+
+New in 1.7.3 (2022-12-16)
+-----------------------------
+
+### Bugfixes
+
+- Debugger: Fixed issue where the stack of the debugger could end up being unsynchronized.
+- Don't prefix module name for keywords in the current module. [#843](https://github.com/robocorp/robotframework-lsp/issues/843)
+
+
+New in 1.7.0 (2022-12-13)
+-----------------------------
+
+### New features
+
+- Improvement in the sorting of completions (completions which start with the current prefix appear first). [#812](https://github.com/robocorp/robotframework-lsp/issues/812)
+- It's possible to make a launch with a target in the arguments by specifying `<target-in-args>` as the target.
+
+### Bugfixes
+
+- Properly collect references for keywords with variables in the name. [#827](https://github.com/robocorp/robotframework-lsp/issues/827)
+- Add placeholders when completing keywords with variables in the name. [#824](https://github.com/robocorp/robotframework-lsp/issues/824)
+- If there's some error in a debugger callback, don't break execution. [#841](https://github.com/robocorp/robotframework-lsp/issues/841)
+- Find references for variables embedded in keywords. [#825](https://github.com/robocorp/robotframework-lsp/issues/825)
+
+
+New in 1.6.0 (2022-12-03)
+-----------------------------
+
+### New features
+
+- Code completion is now provided for the library name and resource name.
+
+- New Setting to configure keyword completions:
+
+  - `robot.completions.keywords.prefixImportName`: Define whether completions showing keywords should prefix completions with the import name when applied.
+  - `robot.completions.keywords.prefixImportNameIgnore`: Allows defining import names which should not be prefixed for keyword completions. i.e.: `["builtin"]`.
+
+- New Settings to configure completions from keywords *not currently imported* in the current module (a.k.a.: auto-imports):
+
+  - `robot.completions.keywordsNotImported.enable`: Defines whether to show completions for keywords not currently imported (adds the proper import when applied).
+  - `robot.completions.keywordsNotImported.addImport`: Defines whether to actually add the import statement when applying completions showing keywords not currently imported.
+
+
 New in 1.5.0 (2022-11-09)
 -----------------------------
 

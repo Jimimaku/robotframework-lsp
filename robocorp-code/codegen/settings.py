@@ -76,21 +76,45 @@ SETTINGS = [
     ),
     Setting(
         "robocorp.verifyLSP",
-        "true",
+        True,
         "Verify if the Robot Framework Language Server is installed?",
         setting_type="boolean",
     ),
     Setting(
         "robocorp.autoSetPythonExtensionInterpreter",
-        "true",
+        True,
         "If a file in a Robot is opened, the python extension interpreter is automatically set to match the Robot interpreter.",
         setting_type="boolean",
     ),
     Setting(
         "robocorp.autoSetPythonExtensionDisableActivateTerminal",
-        "true",
+        True,
         'Automatically sets the value of "python.terminal.activateEnvironment" to false to avoid wrong auto-activation when Robot terminal is created.',
         setting_type="boolean",
+    ),
+    Setting(
+        "robocorp.proceedWithLongPathsDisabled",
+        False,
+        "Enables Robocorp Code to be started even with long paths disabled.",
+        setting_type="boolean",
+    ),
+    Setting(
+        "robocorp.vaultTokenTimeoutInMinutes",
+        30,
+        "Specifies the timeout in minutes for the token generated to access the vault when a launch is made. Note: max 60, min 5, additional timeout may be added internally to reuse the token in future runs (please use Robocorp Control Room or Robocorp Assistant for longer runs).",
+        setting_type="number",
+    ),
+    Setting(
+        "robocorp.codeLens.roboLaunch",
+        True,
+        "Specifies whether the 'Run Task' and 'Debug Task' code lenses should be shown.",
+        setting_type="boolean",
+    ),
+    Setting(
+        "robocorp.actionServer.location",
+        "",
+        "Specifies the location of the action-server executable.",
+        setting_type="string",
     ),
 ]
 

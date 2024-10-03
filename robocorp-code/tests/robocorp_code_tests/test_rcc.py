@@ -1,13 +1,15 @@
-from robocorp_code.protocols import IRcc, IRccRobotMetadata
-import pytest
-from pathlib import Path
+import json
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List
+
+import pytest
 from robocorp_code_tests.fixtures import RccPatch
 from robocorp_ls_core.protocols import ActionResult
-import json
+
+from robocorp_code.protocols import IRcc, IRccRobotMetadata
 
 TIMEOUT_FOR_UPDATES_IN_SECONDS = 1
 TIMEOUT_TO_REUSE_SPACE = 3
@@ -19,8 +21,8 @@ def test_rcc_template_names(rcc: IRcc):
     assert result.success
     assert result.result
     template_names = [template["name"] for template in result.result]
-    assert "standard" in template_names
-    assert "python" in template_names
+    assert "01-python" in template_names
+    assert "11-rfw-standard" in template_names
 
 
 def test_rcc_cloud_issues(rcc: IRcc, ci_credentials: str, tmpdir, rcc_patch: RccPatch):
@@ -168,7 +170,7 @@ def test_rcc_cloud(rcc: IRcc, ci_credentials: str, tmpdir):
 
     wsdir = str(tmpdir.join("ws"))
 
-    result = rcc.create_robot("standard", wsdir)
+    result = rcc.create_robot("01-python", wsdir)
     assert result.success
     result = rcc.cloud_set_robot_contents(wsdir, ws.workspace_id, act.robot_id)
     assert result.success
@@ -243,9 +245,9 @@ class _RobotInfo:
 
 
 def test_get_robot_yaml_environ(rcc: IRcc, datadir, holotree_manager):
-    from robocorp_code.protocols import IRobotYamlEnvInfo
     from robocorp_ls_core.protocols import ActionResult
-    from robocorp_code.protocols import IRCCSpaceInfo
+
+    from robocorp_code.protocols import IRCCSpaceInfo, IRobotYamlEnvInfo
 
     robot1 = _RobotInfo(datadir, "robot1")
     robot2 = _RobotInfo(datadir, "robot2")
@@ -391,8 +393,9 @@ def test_get_robot_yaml_environ_not_ok(rcc: IRcc, datadir, holotree_manager):
     listener = RccListener()
 
     rcc.rcc_listeners.append(listener)
-    from robocorp_code.protocols import IRobotYamlEnvInfo
     from robocorp_ls_core.protocols import ActionResult
+
+    from robocorp_code.protocols import IRobotYamlEnvInfo
 
     bad_robot1 = _RobotInfo(datadir, "bad_robot1")
     result: ActionResult[IRobotYamlEnvInfo] = rcc.get_robot_yaml_env_info(

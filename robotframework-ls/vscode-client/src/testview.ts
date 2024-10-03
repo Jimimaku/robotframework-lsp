@@ -7,6 +7,7 @@ import { jsonEscapeUTF } from "./escape";
 
 import * as nodePath from "path";
 import { sleep } from "./time";
+import { getWorkspaceFolderForUriAndShowInfoIfNotFound } from "./common";
 
 const posixPath = nodePath.posix || nodePath;
 
@@ -38,13 +39,15 @@ export interface ITestInfoFromUri {
     testInfo: ITestInfoFromSymbolsCache[];
 }
 
-const controller = vscode.tests.createTestController("robotframework-lsp.testController", "Robot Framework");
+const controller = vscode.workspace.getConfiguration("robot.testView").get<boolean>("enabled")
+    ? vscode.tests.createTestController("robotframework-lsp.testController", "Robot Framework")
+    : undefined;
 
-const runProfile = controller.createRunProfile("Run", vscode.TestRunProfileKind.Run, (request, token) => {
+const runProfile = controller?.createRunProfile("Run", vscode.TestRunProfileKind.Run, (request, token) => {
     runHandler(false, request, token);
 });
 
-const debugProfile = controller.createRunProfile("Debug", vscode.TestRunProfileKind.Debug, (request, token) => {
+const debugProfile = controller?.createRunProfile("Debug", vscode.TestRunProfileKind.Debug, (request, token) => {
     runHandler(true, request, token);
 });
 
@@ -66,6 +69,7 @@ export const DEBUG_PROFILE = debugProfile;
 // };
 
 export async function clearTestItems() {
+    if (!controller) return;
     controller.items.replace([]);
     testItemIdToTestItem.clear();
 }
@@ -83,9 +87,9 @@ interface ITestData {
 const testData = new WeakMap<vscode.TestItem, ITestData>(); // Actually weak key map.
 
 let lastRunId = 0;
-function nextRunId(): string {
+export function nextRunId(): string {
     lastRunId += 1;
-    return `TestRun: ${lastRunId}`;
+    return `Run: ${lastRunId}`;
 }
 
 const runIdToTestRun = new Map<string, vscode.TestRun>();
@@ -98,9 +102,6 @@ const testItemIdToTestItem = new WeakValueMap<string, vscode.TestItem>();
 export function computeUriTestId(uri: string): string {
     if (uri.startsWith("id:")) {
         throw new Error("It seems that this uri is actually a test id already.");
-    }
-    if (process.platform == "win32") {
-        uri = uri.toLowerCase();
     }
     return "id:" + uri;
 }
@@ -157,10 +158,6 @@ function removeTreeStructure(uri: vscode.Uri) {
 function addTreeStructure(workspaceFolder: vscode.WorkspaceFolder, uri: vscode.Uri): vscode.TestItem {
     let workspaceFolderPath = workspaceFolder.uri.path;
     let uriPath = uri.path;
-    if (process.platform == "win32") {
-        workspaceFolderPath = workspaceFolderPath.toLowerCase();
-        uriPath = uriPath.toLowerCase();
-    }
     const path = posixPath.relative(workspaceFolderPath, uriPath);
     const parts = path.split("/");
 
@@ -197,7 +194,7 @@ function addTreeStructure(workspaceFolder: vscode.WorkspaceFolder, uri: vscode.U
 export async function handleTestsCollected(testInfo: ITestInfoFromUri) {
     const uri = vscode.Uri.parse(testInfo.uri);
 
-    const workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+    const workspaceFolder = getWorkspaceFolderForUriAndShowInfoIfNotFound(uri);
     if (workspaceFolder === undefined) {
         return;
     }
@@ -261,7 +258,7 @@ async function runHandler(shouldDebug: boolean, request: vscode.TestRunRequest, 
     while (queue.length > 0 && !token.isCancellationRequested) {
         const test = queue.pop()!;
         let uri = test.uri;
-        let workspaceFolder = vscode.workspace.getWorkspaceFolder(uri);
+        let workspaceFolder = getWorkspaceFolderForUriAndShowInfoIfNotFound(uri);
         if (workspaceFolder) {
             workspaceFolders.add(workspaceFolder);
         } else {

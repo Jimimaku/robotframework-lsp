@@ -48,7 +48,6 @@ def require_monitor(func):
 
 
 class Endpoint(object):
-
     SHOW_THREAD_DUMP_AFTER_TIMEOUT = 8
 
     def __init__(self, dispatcher, consumer, id_generator=lambda: str(uuid.uuid4())):
@@ -75,6 +74,9 @@ class Endpoint(object):
         # i.e.: 5 to 15 workers.
         max_workers = min(15, (os.cpu_count() or 1) + 4)
         self._executor_service = futures.ThreadPoolExecutor(max_workers=max_workers)
+
+        # Also put it in the public API.
+        self.executor_service = self._executor_service
 
     def shutdown(self):
         self._executor_service.shutdown(wait=False)

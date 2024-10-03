@@ -9,7 +9,6 @@ if sys.version_info[:2] < (3, 8):
     class Protocol(object):
         pass
 
-
 else:
     from typing import Protocol
 
@@ -101,5 +100,5 @@ class IRobotDebugger(Protocol):
 
 
 class INextId(Protocol):
-    def __call__(self) -> T:
+    def __call__(self) -> int:
         pass

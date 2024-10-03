@@ -101,6 +101,34 @@ def test_references_with_name_2(workspace, libspec_manager, data_regression):
     check_data_regression(result, data_regression)
 
 
+def test_references_keyword_with_vars(workspace, libspec_manager, data_regression):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl.references import references
+
+    workspace.set_root("case2", libspec_manager=libspec_manager, index_workspace=True)
+    doc = workspace.put_doc("my.robot")
+    doc.source = """
+*** Test Cases ***
+My Test
+    my task 222
+
+
+*** Keywords ***
+My task ${something}
+    Log    ${something}
+    """
+
+    line = doc.find_line_with_contents("My task ${something}")
+
+    completion_context = CompletionContext(
+        doc, workspace=workspace.ws, line=line, col=4
+    )
+    result = references(completion_context, include_declaration=True)
+    assert result
+
+    check_data_regression(result, data_regression)
+
+
 def test_references_multiple(workspace, libspec_manager, data_regression):
     from robotframework_ls.impl.completion_context import CompletionContext
     from robotframework_ls.impl.references import references
@@ -225,6 +253,34 @@ Keyword
     )
     line = doc.find_line_with_contents("        Log     ${foo}")
     col = len("        Log     ${f")
+    completion_context = CompletionContext(
+        doc, workspace=workspace.ws, line=line, col=col
+    )
+    result = references(completion_context, include_declaration=True)
+    assert result
+    check_data_regression(result, data_regression)
+
+
+def test_references_variable_in_keyword_call(
+    workspace, libspec_manager, data_regression
+):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl.references import references
+
+    workspace.set_root("case2", libspec_manager=libspec_manager, index_workspace=True)
+    doc = workspace.put_doc(
+        "case2.robot",
+        """
+*** Keywords ***
+Keyword
+    ${foo}=    set variable    bar
+    Log    ${foo}
+    
+    Keyword with ${foo} Embedded
+    """,
+    )
+    line = doc.find_line_with_contents("${foo}=    set variable    bar")
+    col = len("    ${f")
     completion_context = CompletionContext(
         doc, workspace=workspace.ws, line=line, col=col
     )
@@ -392,4 +448,84 @@ Some Keyword
     )
 
     result = references(completion_context, include_declaration=True)
+    check_data_regression(result, data_regression)
+
+
+def test_references_evaluate(workspace, libspec_manager, data_regression):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl.references import references
+
+    workspace.set_root("case2", libspec_manager=libspec_manager, index_workspace=True)
+
+    doc = workspace.put_doc("case2.robot")
+    doc.source = """
+*** Test Cases ***
+Some Test Case
+    ${variable}=    Set Variable    22
+    Evaluate    $variable"""
+
+    line, col = doc.get_last_line_col()
+    completion_context = CompletionContext(
+        doc, workspace=workspace.ws, line=line, col=col
+    )
+
+    result = references(completion_context, include_declaration=True)
+    check_data_regression(result, data_regression)
+
+
+def test_references_global_vars_evaluate(workspace, libspec_manager, data_regression):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl.references import references
+
+    workspace.set_root("case2", libspec_manager=libspec_manager, index_workspace=True)
+
+    doc = workspace.put_doc("case2.robot")
+    doc.source = """
+*** Test Cases ***
+Some Test Case
+    Set Global Variable    ${someglobalvar}
+    Log    ${SOME_GLOBAL_VAR}
+"""
+
+    doc2 = workspace.put_doc("case2a.robot")
+    doc2.source = """
+*** Keywords ***
+Some Keyword
+    Evaluate    $someglobalvar
+"""
+
+    line, col = doc.get_last_line_col_with_contents("    Log    ${SOME_GLOBAL_VAR}")
+    col -= 2
+    completion_context = CompletionContext(
+        doc, workspace=workspace.ws, line=line, col=col
+    )
+
+    result = references(completion_context, include_declaration=True)
+    check_data_regression(result, data_regression)
+
+
+def test_references_dictionary(workspace, libspec_manager, data_regression):
+    from robotframework_ls.impl.completion_context import CompletionContext
+    from robotframework_ls.impl.references import references
+
+    workspace.set_root("case2", libspec_manager=libspec_manager, index_workspace=True)
+
+    doc, selected_range = workspace.put_doc_get_line_col(
+        "case2.robot",
+        """
+*** Test Cases ***
+My test
+    ${key}=    Set Variable    key
+    ${dict}=    Create Dictionary    ${ke|y}=value
+    Log    ${dict}[${key}]
+""",
+    )
+    line, col = selected_range.get_end_line_col()
+
+    completion_context = CompletionContext(
+        doc, workspace=workspace.ws, line=line, col=col
+    )
+
+    result = references(completion_context, include_declaration=True)
+    assert len(result) == 3
     check_data_regression(result, data_regression)

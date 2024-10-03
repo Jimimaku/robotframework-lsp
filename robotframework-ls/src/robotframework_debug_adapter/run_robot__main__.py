@@ -307,7 +307,6 @@ class _RobotTargetComm(threading.Thread):
         log.info("Normalized %s to %s", path, filename)
 
         if request.arguments.breakpoints:
-
             for bp in request.arguments.breakpoints:
                 source_breakpoint = SourceBreakpoint(**bp)
                 breakpoints.append(
@@ -598,7 +597,8 @@ def main():
     robot_args = args[3:]
 
     # Always add the listener (because even when not debugging we want
-    # to be able to provide output messages for logging).
+    # to be able to provide output messages for logging as well as
+    # information to be show in the `Robot Output` View).
     robot_args = [
         "--listener=robotframework_debug_adapter.listeners.DebugListener",
         "--listener=robotframework_debug_adapter.listeners.DebugListenerV2",
@@ -651,6 +651,10 @@ def main():
             sys.stderr.write("\nError importing robot.\n")
             sys.stderr.write("Python executable: %s.\n\n" % (sys.executable,))
             raise
+
+        from robotframework_debug_adapter.listeners import install_rf_stream_connection
+
+        install_rf_stream_connection(processor.write_message)
 
         from robot import run_cli
 

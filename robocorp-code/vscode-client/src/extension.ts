@@ -37,7 +37,7 @@ import {
 } from "vscode";
 import { LanguageClientOptions, State } from "vscode-languageclient";
 import { LanguageClient, ServerOptions } from "vscode-languageclient/node";
-import * as inspector from "./inspector";
+import * as playwright from "./playwright";
 import { copySelectedToClipboard, removeLocator } from "./locators";
 import * as views from "./views";
 import * as roboConfig from "./robocorpSettings";
@@ -61,9 +61,11 @@ import {
     askAndRunRobotRCC,
     rccConfigurationDiagnostics,
     updateLaunchEnvironment,
+    resolveInterpreter,
+    listAndAskRobotSelection,
 } from "./activities";
 import { handleProgressMessage, ProgressReport } from "./progress";
-import { TREE_VIEW_ROBOCORP_ROBOTS_TREE, TREE_VIEW_ROBOCORP_ROBOT_CONTENT_TREE } from "./robocorpViews";
+import { TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE, TREE_VIEW_ROBOCORP_PACKAGE_CONTENT_TREE } from "./robocorpViews";
 import { askAndCreateRccTerminal } from "./rccTerminal";
 import {
     deleteResourceInRobotContentTree,
@@ -120,8 +122,8 @@ import {
     ROBOCORP_OPEN_IN_VS_CODE,
     ROBOCORP_REVEAL_IN_EXPLORER,
     ROBOCORP_REVEAL_ROBOT_IN_EXPLORER,
-    ROBOCORP_CONNECT_VAULT,
-    ROBOCORP_DISCONNECT_VAULT,
+    ROBOCORP_CONNECT_WORKSPACE,
+    ROBOCORP_DISCONNECT_WORKSPACE,
     ROBOCORP_OPEN_VAULT_HELP,
     ROBOCORP_CLEAR_ENV_AND_RESTART,
     ROBOCORP_NEW_ROBOCORP_INSPECTOR_WINDOWS,
@@ -132,20 +134,48 @@ import {
     ROBOCORP_OPEN_LOCATORS_JSON,
     ROBOCORP_OPEN_ROBOT_CONDA_TREE_SELECTION,
     ROBOCORP_CONVERT_PROJECT,
-    ROBOCORP_NEW_ROBOCORP_INSPECTOR_WEB_RECORDER,
+    ROBOCORP_PROFILE_IMPORT,
+    ROBOCORP_PROFILE_SWITCH,
+    ROBOCORP_RUN_ROBOCORPS_PYTHON_TASK,
+    ROBOCORP_DEBUG_ROBOCORPS_PYTHON_TASK,
+    ROBOCORP_OPEN_PLAYWRIGHT_RECORDER,
+    ROBOCORP_INSPECTOR,
+    ROBOCORP_INSPECTOR_DUPLICATE,
+    ROBOCORP_START_ACTION_SERVER,
+    ROBOCORP_OPEN_PACKAGE_YAML_TREE_SELECTION,
+    ROBOCORP_ROBOTS_VIEW_ACTION_RUN,
+    ROBOCORP_ROBOTS_VIEW_ACTION_DEBUG,
+    ROBOCORP_ROBOTS_VIEW_ACTION_EDIT_INPUT,
+    ROBOCORP_ROBOTS_VIEW_ACTION_OPEN,
+    ROBOCORP_RUN_ACTION_FROM_ACTION_PACKAGE,
+    ROBOCORP_DEBUG_ACTION_FROM_ACTION_PACKAGE,
+    ROBOCORP_CREATE_ACTION_PACKAGE,
+    ROBOCORP_CREATE_TASK_OR_ACTION_PACKAGE,
+    ROBOCORP_NEW_ROBOCORP_INSPECTOR_JAVA,
+    ROBOCORP_DOWNLOAD_ACTION_SERVER,
+    ROBOCORP_PACKAGE_ENVIRONMENT_REBUILD,
 } from "./robocorpCommands";
-import { installPythonInterpreterCheck } from "./pythonExtIntegration";
+import { installWorkspaceWatcher } from "./pythonExtIntegration";
 import { refreshCloudTreeView } from "./viewsRobocorp";
-import { connectVault, disconnectVault } from "./vault";
-import { getLanguageServerPythonInfoUncached } from "./extensionCreateEnv";
+import { connectWorkspace, disconnectWorkspace } from "./vault";
+import { CACHE_KEY_LAST_WORKED, getLanguageServerPythonInfoUncached } from "./extensionCreateEnv";
 import { registerDebugger } from "./debugger";
 import { clearRCCEnvironments, clearRobocorpCodeCaches, computeEnvsToCollect } from "./clear";
 import { Mutex } from "./mutex";
 import { mergeEnviron } from "./subprocess";
 import { feedback } from "./rcc";
 import { showSubmitIssueUI } from "./submitIssue";
-import { ensureConvertBundle } from "./conversion";
-import { TextDecoder } from "util";
+import { showConvertUI } from "./conversionView";
+import { profileImport, profileSwitch } from "./profiles";
+import { registerLinkProviders } from "./robo/linkProvider";
+import { runRobocorpTasks } from "./robo/runRobocorpTasks";
+import { RobotOutputViewProvider } from "./output/outView";
+import { setupDebugSessionOutViewIntegration } from "./output/outViewRunIntegration";
+import { showInspectorUI } from "./inspector/inspectorView";
+import { IAppRoutes } from "./inspector/protocols";
+import { downloadLatestActionServer, startActionServer } from "./actionServer";
+import { askAndRunRobocorpActionFromActionPackage, createActionPackage } from "./robo/actionPackage";
+import { showSelectOneStrQuickPick } from "./ask";
 
 interface InterpreterInfo {
     pythonExe: string;
@@ -157,7 +187,13 @@ const clientOptions: LanguageClientOptions = {
     documentSelector: [
         { language: "json", pattern: "**/locators.json" },
         { language: "yaml", pattern: "**/conda.yaml" },
+        { language: "yaml", pattern: "**/action-server.yaml" },
         { language: "yaml", pattern: "**/robot.yaml" },
+        { language: "yaml", pattern: "**/package.yaml" },
+
+        // Needed to detect tasks decorated with @task (from robocorp.tasks).
+        // Needed to detect actions decorated with @action (from robocorp.actions).
+        { language: "python", pattern: "**/*.py" },
     ],
     synchronize: {
         configurationSection: "robocorp",
@@ -295,34 +331,35 @@ class CommandRegistry {
 }
 
 async function verifyRobotFrameworkInstalled() {
-    if (!roboConfig.getVerifylsp()) {
-        return;
-    }
-    const ROBOT_EXTENSION_ID = "robocorp.robotframework-lsp";
-    let found = true;
-    try {
-        let extension = extensions.getExtension(ROBOT_EXTENSION_ID);
-        if (!extension) {
-            found = false;
-        }
-    } catch (error) {
-        found = false;
-    }
-    if (!found) {
-        // It seems it's not installed, install?
-        let install = "Install";
-        let dontAsk = "Don't ask again";
-        let chosen = await window.showInformationMessage(
-            "It seems that the Robot Framework Language Server extension is not installed to work with .robot Files.",
-            install,
-            dontAsk
-        );
-        if (chosen == install) {
-            await commands.executeCommand("workbench.extensions.search", ROBOT_EXTENSION_ID);
-        } else if (chosen == dontAsk) {
-            roboConfig.setVerifylsp(false);
-        }
-    }
+    // No longer tries to check whether RFLS is installed (not required for Python).
+    // if (!roboConfig.getVerifylsp()) {
+    //     return;
+    // }
+    // const ROBOT_EXTENSION_ID = "robocorp.robotframework-lsp";
+    // let found = true;
+    // try {
+    //     let extension = extensions.getExtension(ROBOT_EXTENSION_ID);
+    //     if (!extension) {
+    //         found = false;
+    //     }
+    // } catch (error) {
+    //     found = false;
+    // }
+    // if (!found) {
+    //     // It seems it's not installed, install?
+    //     let install = "Install";
+    //     let dontAsk = "Don't ask again";
+    //     let chosen = await window.showInformationMessage(
+    //         "It seems that the Robot Framework Language Server extension is not installed to work with .robot Files.",
+    //         install,
+    //         dontAsk
+    //     );
+    //     if (chosen == install) {
+    //         await commands.executeCommand("workbench.extensions.search", ROBOT_EXTENSION_ID);
+    //     } else if (chosen == dontAsk) {
+    //         roboConfig.setVerifylsp(false);
+    //     }
+    // }
 }
 
 async function cloudLoginShowConfirmationAndRefresh() {
@@ -338,163 +375,61 @@ async function cloudLogoutAndRefresh() {
     refreshCloudTreeView();
 }
 
-async function convertProject() {
-    const DEFAULT_ERROR_MSG = `
-            Could not convert project.
-            Please check the output logs for more details.
-            `;
-    const DEFAULT_ERROR_STATUS = "Error while converting project.";
+function registerRobocorpCodeCommands(C: CommandRegistry, context: ExtensionContext) {
+    C.register(ROBOCORP_START_ACTION_SERVER, startActionServer);
 
-    const convertBundlePromise = ensureConvertBundle();
-    try {
-        // let the user decide where the conversion result will be saved
-        const wsFolders: ReadonlyArray<WorkspaceFolder> = workspace.workspaceFolders;
-        let ws: WorkspaceFolder;
-        if (wsFolders !== undefined && wsFolders.length == 1) {
-            ws = wsFolders[0];
-        } else {
-            ws = await window.showWorkspaceFolderPick({
-                "placeHolder": "Please select the workspace folder for the conversion output",
-                "ignoreFocusOut": true,
-            });
-        }
-        if (!ws) {
-            // exit conversion if there is no workspace
-            window.showErrorMessage(
-                `No workspace found for the conversion output.
-                Please open a folder in the current window.`
-            );
-            return;
-        }
-        const destination = Uri.joinPath(ws.uri, "converted");
-
-        // let the user decide what type of project will be converted
-        const vendorMap = {
-            "Blue Prism": "blueprism",
-            "UiPath": "uipath",
-            "Automation Anywhere 360": "a360",
-        };
-        const items = Object.keys(vendorMap);
-        const selectedFormat = await window.showQuickPick(items, {
-            "placeHolder": `Please select the bot format`,
-            "canPickMany": false,
-            "ignoreFocusOut": true,
-        });
-        if (!selectedFormat) {
-            // exit conversion if there is no format selected
-            return;
-        }
-
-        // actual converson
-        const converterLocation = await convertBundlePromise;
-        if (!converterLocation) {
-            throw new Error("There was an issue downloading the converter bundle. Please try again.");
-        }
-        const converterBundle = require(converterLocation.pathToExecutable);
-
-        let conversionResult: ConversionResult = null;
-        const vendor = vendorMap[selectedFormat];
-
-        // let the user decide what should be converted
-        switch (vendor) {
-            case vendorMap["Automation Anywhere 360"]: {
-                const folderToConvert: Uri[] = await window.showOpenDialog({
-                    "canSelectFolders": true,
-                    "canSelectFiles": false,
-                    "canSelectMany": false,
-                    "openLabel": `Select a ${vendor} project to convert`,
-                });
-                if (!folderToConvert || folderToConvert.length === 0) {
-                    return;
-                }
-                const uri = folderToConvert[0];
-                const options = {
-                    projectFolderPath: uri.fsPath,
-                };
-                conversionResult = await converterBundle.convert(vendor, undefined, options);
-                break;
-            }
-            case vendorMap["Blue Prism"]:
-            case vendorMap["UiPath"]: {
-                const fileToConvert: Uri[] = await window.showOpenDialog({
-                    "canSelectFolders": false,
-                    "canSelectFiles": true,
-                    "canSelectMany": false,
-                    "openLabel": `Select a ${vendor} file to convert`,
-                });
-                if (!fileToConvert || fileToConvert.length === 0) {
-                    return;
-                }
-                const uri = fileToConvert[0];
-                const bytes = await workspace.fs.readFile(uri);
-                const contents = new TextDecoder("utf-8").decode(bytes);
-                const options = {
-                    objectImplFile: converterLocation.pathToConvertYaml,
-                };
-                conversionResult = await converterBundle.convert(vendor, contents, options);
-                break;
-            }
-            default:
-                throw new Error(`Unknown format ${vendor}`);
-        }
-
-        if (!converterBundle.isSuccessful(conversionResult)) {
-            logError(
-                "Error converting file to Robocorp Robot",
-                new Error((<ConversionFailure>conversionResult).error),
-                "EXT_CONVERT_PROJECT"
-            );
-            window.showErrorMessage(DEFAULT_ERROR_MSG);
-            OUTPUT_CHANNEL.show();
-            return;
-        }
-        const populate_action: ActionResult<string> = await commands.executeCommand(
-            "robocorp.saveConvertedProject.internal",
-            {
-                "destinationFolderURI": destination.toString(),
-                "conversionResult": conversionResult,
-                "projectSourceVendor": vendorMap[selectedFormat],
-            }
-        );
-        if (!populate_action.success) {
-            throw new Error(populate_action.message);
-        }
-        window.showInformationMessage("Project conversion succeeded, saved inside ${workspace}/converted.");
-    } catch (err) {
-        logError(DEFAULT_ERROR_STATUS, err, "EXT_CONVERT_PROJECT");
-        window.showErrorMessage(DEFAULT_ERROR_MSG);
-        OUTPUT_CHANNEL.show();
-        return;
-    }
-}
-
-function registerRobocorpCodeCommands(C: CommandRegistry) {
     C.register(ROBOCORP_GET_LANGUAGE_SERVER_PYTHON, () => getLanguageServerPython());
     C.register(ROBOCORP_GET_LANGUAGE_SERVER_PYTHON_INFO, () => getLanguageServerPythonInfo());
     C.register(ROBOCORP_CREATE_ROBOT, () => createRobot());
+    C.register(ROBOCORP_CREATE_ACTION_PACKAGE, () => createActionPackage());
+    C.register(ROBOCORP_CREATE_TASK_OR_ACTION_PACKAGE, async () => {
+        const TASK_PACKAGE = "Task Package (Robot)";
+        const ACTION_PACKAGE = "Action Package";
+        const packageType = await showSelectOneStrQuickPick(
+            [TASK_PACKAGE, ACTION_PACKAGE],
+            "Which kind of Package would you like to create?"
+        );
+        if (packageType) {
+            if (packageType === TASK_PACKAGE) {
+                createRobot();
+            } else if (packageType === ACTION_PACKAGE) {
+                createActionPackage();
+            }
+        }
+    });
+    C.register(ROBOCORP_DOWNLOAD_ACTION_SERVER, async () => {
+        try {
+            const location = await downloadLatestActionServer();
+            window.showInformationMessage(`The latest action server was downloaded to: ${location}`);
+        } catch (error) {
+            logError("Error downloading latest action server", error, "ERR_DOWNLOAD_ACTION_SERVER");
+            window.showErrorMessage(
+                "There was an error downloading the action server. See `OUTPUT > Robocorp Code` for more information."
+            );
+        }
+    });
     C.register(ROBOCORP_UPLOAD_ROBOT_TO_CLOUD, () => uploadRobot());
     C.register(ROBOCORP_CONFIGURATION_DIAGNOSTICS, () => rccConfigurationDiagnostics());
     C.register(ROBOCORP_RUN_ROBOT_RCC, () => askAndRunRobotRCC(true));
     C.register(ROBOCORP_DEBUG_ROBOT_RCC, () => askAndRunRobotRCC(false));
+    C.register(ROBOCORP_RUN_ACTION_FROM_ACTION_PACKAGE, () => askAndRunRobocorpActionFromActionPackage(true));
+    C.register(ROBOCORP_DEBUG_ACTION_FROM_ACTION_PACKAGE, () => askAndRunRobocorpActionFromActionPackage(false));
     C.register(ROBOCORP_SET_PYTHON_INTERPRETER, () => setPythonInterpreterFromRobotYaml());
-    C.register(ROBOCORP_REFRESH_ROBOTS_VIEW, () => refreshTreeView(TREE_VIEW_ROBOCORP_ROBOTS_TREE));
+    C.register(ROBOCORP_REFRESH_ROBOTS_VIEW, () => refreshTreeView(TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE));
     C.register(ROBOCORP_REFRESH_CLOUD_VIEW, () => refreshCloudTreeView());
     C.register(ROBOCORP_ROBOTS_VIEW_TASK_RUN, (entry: RobotEntry) => views.runSelectedRobot(true, entry));
     C.register(ROBOCORP_ROBOTS_VIEW_TASK_DEBUG, (entry: RobotEntry) => views.runSelectedRobot(false, entry));
-    C.register(ROBOCORP_EDIT_ROBOCORP_INSPECTOR_LOCATOR, (locator?: LocatorEntry) =>
-        inspector.openRobocorpInspector(undefined, locator)
-    );
-    C.register(ROBOCORP_NEW_ROBOCORP_INSPECTOR_BROWSER, () =>
-        inspector.openRobocorpInspector(inspector.InspectorType.Browser)
-    );
-    C.register(ROBOCORP_NEW_ROBOCORP_INSPECTOR_IMAGE, () =>
-        inspector.openRobocorpInspector(inspector.InspectorType.Image)
-    );
-    C.register(ROBOCORP_NEW_ROBOCORP_INSPECTOR_WINDOWS, () =>
-        inspector.openRobocorpInspector(inspector.InspectorType.Windows)
-    );
-    C.register(ROBOCORP_NEW_ROBOCORP_INSPECTOR_WEB_RECORDER, () =>
-        inspector.openRobocorpInspector(inspector.InspectorType.WebRecorder)
+    C.register(ROBOCORP_ROBOTS_VIEW_ACTION_RUN, (entry: RobotEntry) => views.runSelectedAction(true, entry));
+    C.register(ROBOCORP_ROBOTS_VIEW_ACTION_DEBUG, (entry: RobotEntry) => views.runSelectedAction(false, entry));
+    C.register(ROBOCORP_ROBOTS_VIEW_ACTION_EDIT_INPUT, (entry: RobotEntry) => views.editInput(entry));
+    C.register(ROBOCORP_ROBOTS_VIEW_ACTION_OPEN, (entry: RobotEntry) => views.openAction(entry));
+    C.register(ROBOCORP_RUN_ROBOCORPS_PYTHON_TASK, (args: string[]) => runRobocorpTasks(true, args));
+    C.register(ROBOCORP_DEBUG_ROBOCORPS_PYTHON_TASK, (args: string[]) => runRobocorpTasks(false, args));
+    C.register(ROBOCORP_EDIT_ROBOCORP_INSPECTOR_LOCATOR, (locator?: LocatorEntry): Promise<void> => {
+        return showInspectorUI(context, IAppRoutes.LOCATORS_MANAGER);
+    });
+    C.register(ROBOCORP_OPEN_PLAYWRIGHT_RECORDER, (useTreeSelected: boolean = false) =>
+        playwright.openPlaywrightRecorder(useTreeSelected)
     );
     C.register(ROBOCORP_COPY_LOCATOR_TO_CLIPBOARD_INTERNAL, (locator?: LocatorEntry) =>
         copySelectedToClipboard(locator)
@@ -504,6 +439,7 @@ function registerRobocorpCodeCommands(C: CommandRegistry) {
     C.register(ROBOCORP_OPEN_ROBOT_CONDA_TREE_SELECTION, (robot: RobotEntry) =>
         views.openRobotCondaTreeSelection(robot)
     );
+    C.register(ROBOCORP_OPEN_PACKAGE_YAML_TREE_SELECTION, (robot: RobotEntry) => views.openPackageTreeSelection(robot));
     C.register(ROBOCORP_OPEN_LOCATORS_JSON, (locatorRoot) => views.openLocatorsJsonTreeSelection());
     C.register(ROBOCORP_CLOUD_UPLOAD_ROBOT_TREE_SELECTION, (robot: RobotEntry) =>
         views.cloudUploadRobotTreeSelection(robot)
@@ -511,19 +447,19 @@ function registerRobocorpCodeCommands(C: CommandRegistry) {
     C.register(ROBOCORP_OPEN_FLOW_EXPLORER_TREE_SELECTION, (robot: RobotEntry) =>
         commands.executeCommand("robot.openFlowExplorer", Uri.file(robot.robot.directory).toString())
     );
-    C.register(ROBOCORP_CONVERT_PROJECT, async () => convertProject());
+    C.register(ROBOCORP_CONVERT_PROJECT, async () => await showConvertUI(context));
     C.register(ROBOCORP_CREATE_RCC_TERMINAL_TREE_SELECTION, (robot: RobotEntry) =>
         views.createRccTerminalTreeSelection(robot)
     );
     C.register(ROBOCORP_RCC_TERMINAL_NEW, () => askAndCreateRccTerminal());
-    C.register(ROBOCORP_REFRESH_ROBOT_CONTENT_VIEW, () => refreshTreeView(TREE_VIEW_ROBOCORP_ROBOT_CONTENT_TREE));
+    C.register(ROBOCORP_REFRESH_ROBOT_CONTENT_VIEW, () => refreshTreeView(TREE_VIEW_ROBOCORP_PACKAGE_CONTENT_TREE));
     C.register(ROBOCORP_NEW_FILE_IN_ROBOT_CONTENT_VIEW, newFileInRobotContentTree);
     C.register(ROBOCORP_NEW_FOLDER_IN_ROBOT_CONTENT_VIEW, newFolderInRobotContentTree);
     C.register(ROBOCORP_DELETE_RESOURCE_IN_ROBOT_CONTENT_VIEW, deleteResourceInRobotContentTree);
     C.register(ROBOCORP_RENAME_RESOURCE_IN_ROBOT_CONTENT_VIEW, renameResourceInRobotContentTree);
     C.register(ROBOCORP_UPDATE_LAUNCH_ENV, updateLaunchEnvironment);
-    C.register(ROBOCORP_CONNECT_VAULT, connectVault);
-    C.register(ROBOCORP_DISCONNECT_VAULT, disconnectVault);
+    C.register(ROBOCORP_CONNECT_WORKSPACE, connectWorkspace);
+    C.register(ROBOCORP_DISCONNECT_WORKSPACE, disconnectWorkspace);
     C.register(ROBOCORP_OPEN_CLOUD_HOME, async () => {
         const cloudBaseUrl = await getEndpointUrl("cloud-ui");
         commands.executeCommand("vscode.open", Uri.parse(cloudBaseUrl + "home"));
@@ -577,6 +513,8 @@ function registerRobocorpCodeCommands(C: CommandRegistry) {
     C.register(ROBOCORP_NEW_WORK_ITEM_IN_WORK_ITEMS_VIEW, newWorkItemInWorkItemsTree);
     C.register(ROBOCORP_DELETE_WORK_ITEM_IN_WORK_ITEMS_VIEW, deleteWorkItemInWorkItemsTree);
     C.register(ROBOCORP_HELP_WORK_ITEMS, openWorkItemHelp);
+    C.register(ROBOCORP_PROFILE_IMPORT, async () => await profileImport());
+    C.register(ROBOCORP_PROFILE_SWITCH, async () => await profileSwitch());
 }
 
 async function clearEnvAndRestart() {
@@ -700,14 +638,18 @@ async function clearEnvsLocked(progress: vscode.Progress<{ message?: string; inc
     return { "okToRestartRFLS": okToRestartRFLS };
 }
 
-let langServer: LanguageClient;
+export let langServer: LanguageClient;
 let C: CommandRegistry;
 export let globalCachedPythonInfo: InterpreterInfo;
 const langServerMutex: Mutex = new Mutex();
+export let GLOBAL_STATE: undefined | vscode.Memento = undefined;
 
 export async function activate(context: ExtensionContext) {
+    GLOBAL_STATE = context.globalState;
     let timing = new Timing();
     OUTPUT_CHANNEL.appendLine("Activating Robocorp Code extension.");
+    registerLinkProviders(context);
+
     C = new CommandRegistry(context);
 
     try {
@@ -735,6 +677,30 @@ export async function doActivate(context: ExtensionContext, C: CommandRegistry) 
         await showSubmitIssueUI(context);
     });
 
+    // register Inspector applications
+    C.registerWithoutStub(ROBOCORP_INSPECTOR, async () => {
+        await showInspectorUI(context, IAppRoutes.LOCATORS_MANAGER);
+    });
+    C.registerWithoutStub(ROBOCORP_INSPECTOR_DUPLICATE, async () => {
+        await showInspectorUI(context, IAppRoutes.LOCATORS_MANAGER);
+    });
+    C.register(
+        ROBOCORP_NEW_ROBOCORP_INSPECTOR_BROWSER,
+        async () => await showInspectorUI(context, IAppRoutes.WEB_INSPECTOR)
+    );
+    C.register(
+        ROBOCORP_NEW_ROBOCORP_INSPECTOR_WINDOWS,
+        async () => await showInspectorUI(context, IAppRoutes.WINDOWS_INSPECTOR)
+    );
+    C.register(
+        ROBOCORP_NEW_ROBOCORP_INSPECTOR_IMAGE,
+        async () => await showInspectorUI(context, IAppRoutes.IMAGE_INSPECTOR)
+    );
+    C.register(
+        ROBOCORP_NEW_ROBOCORP_INSPECTOR_JAVA,
+        async () => await showInspectorUI(context, IAppRoutes.JAVA_INSPECTOR)
+    );
+
     // i.e.: allow other extensions to also use our submit issue api.
     C.registerWithoutStub(
         ROBOCORP_SUBMIT_ISSUE_INTERNAL,
@@ -761,10 +727,32 @@ export async function doActivate(context: ExtensionContext, C: CommandRegistry) 
     // i.e.: allow other extensions to also use our feedback api.
     C.registerWithoutStub(ROBOCORP_FEEDBACK_INTERNAL, (name: string, value: string) => feedback(name, value));
 
+    C.register(ROBOCORP_PACKAGE_ENVIRONMENT_REBUILD, async () => {
+        const selected = await listAndAskRobotSelection(
+            "Please select the Task/Action Package for which you'd like to rebuild the environment",
+            "Unable to continue because no Action Package was found in the workspace.",
+            { showActionPackages: true, showTaskPackages: false }
+        );
+
+        const result = await resolveInterpreter(selected.filePath);
+        if (result.success) {
+            vscode.window.showInformationMessage(`Environment built & cached. Python interpreter loaded.`);
+        } else {
+            vscode.window.showErrorMessage(`Error resolving interpreter: ${result.message}`);
+        }
+    });
+
     C.registerWithoutStub(ROBOCORP_CLEAR_ENV_AND_RESTART, clearEnvAndRestart);
     // Register other commands (which will have an error message shown depending on whether
     // the extension was activated properly).
-    registerRobocorpCodeCommands(C);
+    registerRobocorpCodeCommands(C, context);
+
+    const outputProvider = new RobotOutputViewProvider(context);
+    const options = { webviewOptions: { retainContextWhenHidden: true } };
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(RobotOutputViewProvider.viewType, outputProvider, options)
+    );
+    await setupDebugSessionOutViewIntegration(context);
 
     const extension = extensions.getExtension("robocorp.robotframework-lsp");
     if (extension) {
@@ -776,11 +764,11 @@ export async function doActivate(context: ExtensionContext, C: CommandRegistry) 
             const major = parseInt(splitted[0]);
             const minor = parseInt(splitted[1]);
             const micro = parseInt(splitted[2]);
-            if (major < 1 || (major == 1 && (minor < 1 || (minor == 1 && micro < 1)))) {
+            if (major < 1 || (major == 1 && (minor < 7 || (minor == 7 && micro < 0)))) {
                 const msg =
                     "Unable to initialize the Robocorp Code extension because the Robot Framework Language Server version (" +
                     version +
-                    ") is not compatible with this version of Robocorp Code. Robot Framework Language Server 1.1.1 or newer is required. Please update to proceed. ";
+                    ") is not compatible with this version of Robocorp Code. Robot Framework Language Server 1.7.0 or newer is required. Please update to proceed. ";
                 OUTPUT_CHANNEL.appendLine(msg);
                 C.useErrorStubs = true;
                 notifyOfInitializationErrorShowOutputTab(msg);
@@ -869,6 +857,8 @@ export async function doActivate(context: ExtensionContext, C: CommandRegistry) 
         // may not be available.
         OUTPUT_CHANNEL.appendLine("Waiting for Robocorp Code (python) language server to finish activating...");
         await langServer.onReady();
+        // If it started properly, mark that it worked.
+        GLOBAL_STATE.update(CACHE_KEY_LAST_WORKED, true);
         OUTPUT_CHANNEL.appendLine(
             "Took: " + startLsTiming.getTotalElapsedAsStr() + " to initialize Robocorp Code Language Server."
         );
@@ -879,7 +869,7 @@ export async function doActivate(context: ExtensionContext, C: CommandRegistry) 
     // Note: start the async ones below but don't await on them (the extension should be considered initialized
     // regardless of it -- as it may call robot.resolveInterpreter, it may need to activate the language
     // server extension, which in turn requires robocorp code to be activated already).
-    installPythonInterpreterCheck(context);
+    installWorkspaceWatcher(context);
     verifyRobotFrameworkInstalled();
 }
 
@@ -898,15 +888,31 @@ async function getLanguageServerPython(): Promise<string | undefined> {
     return info.pythonExe;
 }
 
+// Helper to avoid 2 asyncs starting up the process to get the pyhon info.
+let globalGetLanguageServerPythonInfoUncachedPromise: Promise<InterpreterInfo | undefined>;
+
 export async function getLanguageServerPythonInfo(): Promise<InterpreterInfo | undefined> {
     if (globalCachedPythonInfo) {
         return globalCachedPythonInfo;
     }
-    let cachedPythonInfo = await getLanguageServerPythonInfoUncached();
-    if (!cachedPythonInfo) {
-        return undefined; // Unable to get it.
+
+    if (globalGetLanguageServerPythonInfoUncachedPromise !== undefined) {
+        return await globalGetLanguageServerPythonInfoUncachedPromise;
     }
-    // Ok, we got it (cache that info).
-    globalCachedPythonInfo = cachedPythonInfo;
+
+    try {
+        globalGetLanguageServerPythonInfoUncachedPromise = getLanguageServerPythonInfoUncached();
+
+        let cachedPythonInfo: InterpreterInfo | undefined;
+        cachedPythonInfo = await globalGetLanguageServerPythonInfoUncachedPromise;
+        if (!cachedPythonInfo) {
+            return undefined; // Unable to get it.
+        }
+        // Ok, we got it (cache that info).
+        globalCachedPythonInfo = cachedPythonInfo;
+    } finally {
+        globalGetLanguageServerPythonInfoUncachedPromise = undefined;
+    }
+
     return globalCachedPythonInfo;
 }

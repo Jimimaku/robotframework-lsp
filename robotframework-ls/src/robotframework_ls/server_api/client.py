@@ -24,7 +24,9 @@ class SubprocessDiedError(Exception):
 
 
 class RobotFrameworkApiClient(LanguageServerClientBase):
-    def __init__(self, writer, reader, server_process, on_received_message=None):
+    def __init__(
+        self, writer, reader, server_process, on_received_message=None
+    ) -> None:
         LanguageServerClientBase.__init__(
             self, writer, reader, on_received_message=on_received_message
         )
@@ -54,7 +56,7 @@ class RobotFrameworkApiClient(LanguageServerClientBase):
         return True
 
     def initialize(
-        self, msg_id=None, process_id=None, root_uri=u"", workspace_folders=()
+        self, msg_id=None, process_id=None, root_uri="", workspace_folders=()
     ):
         from robocorp_ls_core.options import NO_TIMEOUT, USE_TIMEOUTS
 
@@ -98,6 +100,7 @@ class RobotFrameworkApiClient(LanguageServerClientBase):
 
             version = msg.get("result", "N/A")
             self._version = version
+            return version
 
         return self._version
 
@@ -213,26 +216,6 @@ class RobotFrameworkApiClient(LanguageServerClientBase):
         msg_id = self.next_id()
         return {"jsonrpc": "2.0", "id": msg_id, "method": method_name, "params": params}
 
-    def request_section_name_complete(
-        self, doc_uri, line, col
-    ) -> Optional[IIdMessageMatcher]:
-        """
-        :Note: async complete.
-        """
-        return self.request_async(
-            self._build_msg("sectionNameComplete", doc_uri=doc_uri, line=line, col=col)
-        )
-
-    def request_keyword_complete(
-        self, doc_uri, line, col
-    ) -> Optional[IIdMessageMatcher]:
-        """
-        :Note: async complete.
-        """
-        return self.request_async(
-            self._build_msg("keywordComplete", doc_uri=doc_uri, line=line, col=col)
-        )
-
     def request_complete_all(
         self, doc_uri, line, col
     ) -> Optional[IIdMessageMatcher[CompletionsResponseTypedDict]]:
@@ -315,6 +298,18 @@ class RobotFrameworkApiClient(LanguageServerClientBase):
         :Note: async complete.
         """
         return self.request_async(self._build_msg("foldingRange", doc_uri=doc_uri))
+
+    def request_on_type_formatting(
+        self, doc_uri: str, ch: str, line: int, col: int
+    ) -> Optional[IIdMessageMatcher]:
+        """
+        :Note: async complete.
+        """
+        return self.request_async(
+            self._build_msg(
+                "onTypeFormatting", doc_uri=doc_uri, ch=ch, line=line, col=col
+            )
+        )
 
     def request_selection_range(
         self, doc_uri, positions: List[PositionTypedDict]
@@ -455,6 +450,20 @@ class RobotFrameworkApiClient(LanguageServerClientBase):
                 "jsonrpc": "2.0",
                 "method": "$/cancelRequest",
                 "params": dict(id=message_id),
+            }
+        )
+
+    def request_sync(self, method, **params):
+        """
+        This API is is a bit simpler than the `request` as it builds the message
+        internally.
+        """
+        return self.request(
+            {
+                "jsonrpc": "2.0",
+                "id": self.next_id(),
+                "method": method,
+                "params": params,
             }
         )
 

@@ -1,35 +1,36 @@
-from subprocess import CalledProcessError, TimeoutExpired, list2cmdline
+import json
+import os.path
 import sys
-from typing import Optional, List, Any, Dict, Set
+import time
 import weakref
+from dataclasses import dataclass
+from pathlib import Path
+from subprocess import CalledProcessError, TimeoutExpired, list2cmdline
+from typing import Any, Dict, List, Optional, Set
 
-from robocorp_ls_core.basic import implements, as_str, is_process_alive
+from robocorp_ls_core.basic import as_str, implements, is_process_alive
 from robocorp_ls_core.constants import NULL
 from robocorp_ls_core.protocols import (
     IConfig,
     IConfigProvider,
-    Sentinel,
     RCCActionResult,
+    Sentinel,
+    check_implements,
 )
-from robocorp_ls_core.robotframework_log import get_logger, get_log_level
-from robocorp_code.protocols import (
-    IRcc,
-    IRccWorkspace,
-    IRccRobotMetadata,
-    ActionResult,
-    IRobotYamlEnvInfo,
-    IRccListener,
-    RobotTemplate,
-    AuthorizeTokenDict,
-)
-from pathlib import Path
-import os.path
-import json
-from robocorp_ls_core.protocols import check_implements
-from dataclasses import dataclass
-import time
-from robocorp_code.rcc_space_info import RCCSpaceInfo, SpaceState
+from robocorp_ls_core.robotframework_log import get_log_level, get_logger
 
+from robocorp_code.protocols import (
+    ActionResult,
+    AuthorizeTokenDict,
+    IRcc,
+    IRccListener,
+    IRccRobotMetadata,
+    IRccWorkspace,
+    IRobotYamlEnvInfo,
+    ProfileListResultTypedDict,
+    RobotTemplate,
+)
+from robocorp_code.rcc_space_info import RCCSpaceInfo, SpaceState
 
 log = get_logger(__name__)
 
@@ -39,7 +40,9 @@ RCC_CREDENTIALS_MUTEX_NAME = "rcc_credentials"
 ACCOUNT_NAME = "robocorp-code"
 
 
-def download_rcc(location: str, force: bool = False) -> None:
+def download_rcc(
+    location: str, force: bool = False, sys_platform: Optional[str] = None
+) -> None:
     """
     Downloads rcc to the given location. Note that we don't overwrite it if it
     already exists (unless force == True).
@@ -51,6 +54,9 @@ def download_rcc(location: str, force: bool = False) -> None:
     """
     from robocorp_ls_core.system_mutex import timed_acquire_mutex
 
+    if sys_platform is None:
+        sys_platform = sys.platform
+
     if not os.path.exists(location) or force:
         with timed_acquire_mutex("robocorp_get_rcc", timeout=120):
             if not os.path.exists(location) or force:
@@ -60,13 +66,13 @@ def download_rcc(location: str, force: bool = False) -> None:
                 machine = platform.machine()
                 is_64 = not machine or "64" in machine
 
-                if sys.platform == "win32":
+                if sys_platform == "win32":
                     if is_64:
                         relative_path = "/windows64/rcc.exe"
                     else:
                         relative_path = "/windows32/rcc.exe"
 
-                elif sys.platform == "darwin":
+                elif sys_platform == "darwin":
                     relative_path = "/macos64/rcc"
 
                 else:
@@ -75,12 +81,17 @@ def download_rcc(location: str, force: bool = False) -> None:
                     else:
                         relative_path = "/linux32/rcc"
 
-                RCC_VERSION = "v11.30.0"
+                RCC_VERSION = "v17.28.4"
                 prefix = f"https://downloads.robocorp.com/rcc/releases/{RCC_VERSION}"
                 url = prefix + relative_path
 
                 log.info(f"Downloading rcc from: {url} to: {location}.")
-                response = urllib.request.urlopen(url)
+
+                # Cloudflare seems to be blocking "User-Agent: Python-urllib/3.9".
+                # Use a different one as that must be sorted out.
+                response = urllib.request.urlopen(
+                    urllib.request.Request(url, headers={"User-Agent": "Mozilla"})
+                )
 
                 # Put it all in memory before writing (i.e. just write it if
                 # we know we downloaded everything).
@@ -180,7 +191,6 @@ class RobotInfoEnv(object):
 
 
 class Rcc(object):
-
     # Note that this is stored in the class, not in the instance.
     # It should store the contents of conda which couldn't be resolved.
     # After being stored once here, it'll only be tried again when
@@ -212,6 +222,16 @@ class Rcc(object):
         from robocorp_code.settings import ROBOCORP_HOME
 
         return self._get_str_optional_setting(ROBOCORP_HOME)
+
+    def get_robocorp_code_datadir(self) -> Path:
+        robocorp_home_str = self.get_robocorp_home_from_settings()
+        if not robocorp_home_str:
+            robocorp_home = get_default_robocorp_home_location()
+        else:
+            robocorp_home = Path(robocorp_home_str)
+
+        directory = robocorp_home / ".robocorp_code"
+        return directory
 
     @property
     def config_location(self) -> Optional[str]:
@@ -268,8 +288,9 @@ class Rcc(object):
             If given sets the stderr redirection (by default it's subprocess.PIPE,
             but users could change it to something as subprocess.STDOUT).
         """
-        from robocorp_ls_core.basic import build_subprocess_kwargs
         from subprocess import check_output
+
+        from robocorp_ls_core.basic import build_subprocess_kwargs
         from robocorp_ls_core.subprocess_wrapper import subprocess
 
         if stderr is Sentinel.SENTINEL:
@@ -316,11 +337,12 @@ class Rcc(object):
                 if not show_interactive_output:
                     boutput = check_output(args, timeout=timeout, **kwargs)
                 else:
-                    from robocorp_code.subprocess_check_output_interactive import (
-                        check_output_interactive,
-                    )
                     from robocorp_ls_core.progress_report import (
                         get_current_progress_reporter,
+                    )
+
+                    from robocorp_code.subprocess_check_output_interactive import (
+                        check_output_interactive,
                     )
 
                     progress_reporter = get_current_progress_reporter()
@@ -446,6 +468,47 @@ class Rcc(object):
         args.append(account_info.account)
         return None
 
+    @implements(IRcc.profile_import)
+    def profile_import(self, profile_path: str) -> ActionResult:
+        args = ["config", "import", "-f", profile_path]
+        args = self._add_config_to_args(args)
+        return self._run_rcc(args, error_msg="Error importing profile.")
+
+    @implements(IRcc.profile_switch)
+    def profile_switch(self, profile_name: str) -> ActionResult:
+        if profile_name == "<remove-current-back-to-defaults>":
+            args = ["config", "switch", "-n"]
+        else:
+            args = ["config", "switch", "-p", profile_name]
+        args = self._add_config_to_args(args)
+        return self._run_rcc(args, error_msg="Error switching profile.")
+
+    @implements(IRcc.profile_list)
+    def profile_list(self) -> ActionResult[ProfileListResultTypedDict]:
+        """
+        Result is something as:
+
+        {
+          "current": "default",
+          "profiles": {
+            "beta": "<description>"
+            "charlie": "<description>"
+          }
+        }
+        """
+        args = ["config", "switch", "-j"]
+        args = self._add_config_to_args(args)
+        ret = self._run_rcc(args, error_msg="Error listing profiles.")
+        if not ret.success:
+            return ActionResult(False, ret.message, None)
+        try:
+            assert ret.result
+            return ActionResult(True, None, json.loads(ret.result))
+        except Exception as e:
+            message = f"Error loading result as json. {e}"
+            log.exception(message)
+            return ActionResult(False, message, None)
+
     @implements(IRcc.create_robot)
     def create_robot(
         self, template: str, directory: str, force: bool = False
@@ -491,7 +554,6 @@ class Rcc(object):
         return account is not None
 
     def get_valid_account_info(self) -> Optional[AccountInfo]:
-
         self._last_verified_account_info = None
         args = [
             "config",
@@ -533,7 +595,6 @@ class Rcc(object):
             for credential in credentials:
                 timestamp = credential.get("verified")
                 if timestamp and int(timestamp):
-
                     details = credential.get("details", {})
                     if not isinstance(details, dict):
                         email = "<Email:Unknown>"
@@ -565,7 +626,37 @@ class Rcc(object):
         args.append(workspace_id)
 
         args.append("--minutes")
-        args.append("120")
+
+        config_provider = self._config_provider()
+        config: Optional[IConfig] = None
+        timeout = 30
+        if config_provider is not None:
+            config = config_provider.config
+            if config:
+                from robocorp_code.settings import (
+                    ROBOCORP_VAULT_TOKEN_TIMEOUT_IN_MINUTES,
+                )
+
+                timeout = config.get_setting(
+                    ROBOCORP_VAULT_TOKEN_TIMEOUT_IN_MINUTES, int, 30
+                )
+
+        if timeout >= 60:
+            log.info(
+                "Timeout changed from %s to %s (in minutes). Please use Robocorp Control Room or Robocorp Assistant for longer runs.",
+                timeout,
+                60,
+            )
+            timeout = 60
+        elif timeout < 5:
+            log.info("Timeout changed from %s to %s (in minutes).", timeout, 5)
+            timeout = 5
+
+        args.append(f"{round(timeout)}")
+
+        # Always reuse it for 1:30 right now.
+        args.append("--graceperiod")
+        args.append("90")
 
         error_action_result = self._add_account_to_args(args)
         if error_action_result is not None:
@@ -646,7 +737,6 @@ class Rcc(object):
     def cloud_list_workspace_robots(
         self, workspace_id: str
     ) -> ActionResult[List[IRccRobotMetadata]]:
-
         ret: List[IRccRobotMetadata] = []
         args = ["cloud", "workspace"]
         args.extend(("--workspace", workspace_id))
@@ -706,7 +796,6 @@ class Rcc(object):
     def cloud_set_robot_contents(
         self, directory: str, workspace_id: str, robot_id: str
     ) -> ActionResult:
-
         if not os.path.exists(directory):
             return ActionResult(
                 False, f"Expected: {directory} to exist to upload to the Control Room."
@@ -811,8 +900,9 @@ class Rcc(object):
         broken_action_result = self.broken_conda_configs.get(
             formatted_conda_yaml_contents
         )
+
         if broken_action_result is not None:
-            msg = f"Environment from previously broken conda.yaml requested: {conda_yaml_path}.\n-- VSCode restart required to retry."
+            msg = f"Environment from previously broken {conda_yaml_path.name} requested: {conda_yaml_path}.\n-- VSCode restart required to retry."
             log.critical(msg)
             return ActionResult(False, msg, None)
 
@@ -896,7 +986,7 @@ class Rcc(object):
                         return ActionResult(
                             True, None, RobotInfoEnv(new_env, space_info)
                         )
-                except:
+                except Exception:
                     log.exception(
                         "Error when waiting for space_info creation to finish (handled and still waiting)."
                     )
@@ -956,6 +1046,8 @@ class Rcc(object):
             str(conda_yaml_path),
         ]
         args.append("--json")
+        args.append("--no-retry-build")
+        args.append("--no-pyc-management")
         try:
             sys.stderr.write(
                 f"Collecting environment info for {conda_yaml_path} in space: {space_info.space_name}\n"
@@ -1041,9 +1133,6 @@ class Rcc(object):
             log_errors=False,
         )
 
-    def __typecheckself__(self) -> None:
-        _: IRcc = check_implements(self)
-
     def configuration_diagnostics(self, robot_yaml, json=True) -> ActionResult[str]:
         return self._run_rcc(
             ["configuration", "diagnostics"]
@@ -1052,6 +1141,55 @@ class Rcc(object):
             mutex_name=None,
             timeout=60,
         )
+
+    def configuration_settings(self) -> ActionResult[str]:
+        return self._run_rcc(
+            ["configuration", "settings", "--json"],
+            mutex_name=None,
+            timeout=60,
+        )
+
+    def holotree_import(self, zip_file: Path, enable_shared: bool) -> ActionResult[str]:
+        if enable_shared:
+            result = self._run_rcc(
+                ["holotree", "shared", "--enable", "--once"],
+                mutex_name=None,
+                timeout=60,
+            )
+
+            if not result.success:
+                return result
+
+            result = self._run_rcc(
+                ["holotree", "init"],
+                mutex_name=None,
+                timeout=60,
+            )
+
+            if not result.success:
+                return result
+
+        return self._run_rcc(
+            ["holotree", "import", str(zip_file)],
+            mutex_name=None,
+            timeout=500,
+        )
+
+    def holotree_variables(
+        self, conda_yaml: Path, space_name: str, no_build: bool
+    ) -> ActionResult[str]:
+        args = ["holotree", "variables", "--space", space_name, "--json"]
+        if no_build:
+            args.append("--no-build")
+        args.append(str(conda_yaml))
+        return self._run_rcc(
+            args,
+            mutex_name=None,
+            timeout=500,
+        )
+
+    def __typecheckself__(self) -> None:
+        _: IRcc = check_implements(self)
 
 
 def make_numbered_in_temp(
@@ -1065,9 +1203,12 @@ def make_numbered_in_temp(
     of old contents.
     """
     import tempfile
-    from robocorp_code.path_operations import get_user
-    from robocorp_code.path_operations import make_numbered_dir_with_cleanup
-    from robocorp_code.path_operations import LOCK_TIMEOUT
+
+    from robocorp_code.path_operations import (
+        LOCK_TIMEOUT,
+        get_user,
+        make_numbered_dir_with_cleanup,
+    )
 
     user = get_user() or "unknown"
     temproot = tmpdir if tmpdir else Path(tempfile.gettempdir())

@@ -34,6 +34,11 @@ SETTINGS = {
         "default": "",
         "description": "Load variables for code-completion and code-analysis based on an arguments file. Multiple files accepted by separating with a comma.",
     },
+    "robot.loadVariablesFromVariablesFile": {
+        "type": "string",
+        "default": "",
+        "description": "Load variables for code-completion and code-analysis based on an variables file. Multiple files accepted by separating with a comma.",
+    },
     "robot.pythonpath": {
         "type": "array",
         "default": [],
@@ -48,6 +53,21 @@ SETTINGS = {
         "type": "array",
         "default": [],
         "description": "List of libraries which should have the libspec pre-generated.",
+    },
+    "robot.libraries.blacklist": {
+        "type": "array",
+        "default": [],
+        "description": "List of libraries which should be blacklisted and not shown for code-completion.",
+    },
+    "robot.libraries.deprecated": {
+        "type": "array",
+        "default": [
+            {"name": "RPA.Desktop.Windows", "replacement": "RPA.Windows"},
+            {"name": "RPA.Browser", "replacement": "RPA.Browser.Selenium"},
+            {"name": "RPA.Robocloud.Vault", "replacement": "RPA.Robocorp.Vault"},
+            {"name": "RPA.Robocloud.Items", "replacement": "RPA.Robocorp.WorkItems"},
+        ],
+        "description": "List of libraries which should be deprecated and not shown for auto-import code-completion.",
     },
     "robot.codeFormatter": {
         "type": "string",
@@ -127,11 +147,31 @@ SETTINGS = {
         "description": "Defines how completions should be shown for section headers (i.e.: *** Setting(s) ***).\nOne of: plural, singular, both.",
         "enum": ["plural", "singular", "both"],
     },
+    "robot.completions.keywordsNotImported.enable": {
+        "type": "boolean",
+        "default": True,
+        "description": "Defines whether to show completions for keywords not currently imported (adds the proper import statement when applied).",
+    },
+    "robot.completions.keywordsNotImported.addImport": {
+        "type": "boolean",
+        "default": True,
+        "description": "Defines whether to actually add the import statement when applying completions showing keywords not currently imported.",
+    },
     "robot.completions.keywords.format": {
         "type": "string",
         "default": "",
         "description": "Defines how keyword completions should be applied.\nOne of: First upper, Title Case, ALL UPPER, all lower.",
         "enum": ["First upper", "Title Case", "ALL UPPER", "all lower"],
+    },
+    "robot.completions.keywords.prefixImportName": {
+        "type": "boolean",
+        "default": False,
+        "description": "Defines whether completions showing keywords should prefix completions with the module name.",
+    },
+    "robot.completions.keywords.prefixImportNameIgnore": {
+        "type": "array",
+        "default": [],
+        "description": 'Defines module names for which the name should not be prefixed when applying a completion (i.e.: ["builtin"]).',
     },
     "robot.completions.keywords.argumentsSeparator": {
         "type": "string",
@@ -146,7 +186,7 @@ SETTINGS = {
     "robot.editor.4spacesTab": {
         "type": "boolean",
         "default": True,
-        "description": "Replaces the key stroke of tab with 4 spaces. Set to 'false' to active VSCode default.",
+        "description": "Replaces the key stroke of tab with 4 spaces. Set to 'false' to use VSCode default.",
     },
     "robot.quickFix.keywordTemplate": {
         "type": "string",
@@ -193,6 +233,41 @@ SETTINGS = {
         "type": "boolean",
         "default": True,
         "description": "Defines whether a message should be shown at each keyword caller when a keyword fails.",
+    },
+    "robot.timeout.use": {
+        "type": "boolean",
+        "default": True,
+        "description": "Determines whether timeouts should be used or not in the language server (consider disabling timeouts on really slow machines).",
+    },
+    "robot.timeout.general": {
+        "type": "number",
+        "default": 20,
+        "description": "This is the timeout used for most requests in the language server. Set to 0 to disable it.",
+    },
+    "robot.timeout.completions": {
+        "type": "number",
+        "default": 12,
+        "description": "This is the timeout used for code completion requests. Set to 0 to disable it.",
+    },
+    "robot.timeout.codeFormatting": {
+        "type": "number",
+        "default": 20,
+        "description": "This is the timeout used for code formatting requests. Set to 0 to disable it.",
+    },
+    "robot.timeout.collectDocsTimeout": {
+        "type": "number",
+        "default": 60,
+        "description": "This is the timeout used for collecting documentation to show in the ROBOT DOCUMENTATION view. Set to 0 to disable it.",
+    },
+    "robot.timeout.listTestsTimeout": {
+        "type": "number",
+        "default": 40,
+        "description": "This is the timeout used for listing the tests from a robot file. Set to 0 to disable it.",
+    },
+    "robot.testView.enabled": {
+        "type": "boolean",
+        "default": True,
+        "description": "Whether to show robot tests in the test view. You may want to disable this if you are using another test runner (eg. https://github.com/DetachHead/pytest-robotframework)",
     },
 }
 

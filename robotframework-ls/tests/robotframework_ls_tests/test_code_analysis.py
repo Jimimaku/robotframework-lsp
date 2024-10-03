@@ -1,5 +1,7 @@
 from robotframework_ls.impl.robot_version import get_robot_major_version
 import pytest
+from robocorp_ls_core.protocols import IDocument
+from pathlib import Path
 
 
 def _collect_errors(
@@ -32,7 +34,6 @@ def _collect_errors(
 
 
 def test_keywords_analyzed(workspace, libspec_manager, data_regression):
-
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.get_doc("case2.robot")
     doc = workspace.put_doc(
@@ -296,13 +297,13 @@ Variables    DoesNotExistVar
     )
 
 
-def test_casing_on_filename(workspace, libspec_manager, data_regression):
+def test_casing_on_filename(workspace, libspec_manager, data_regression, tmpdir):
     from robocorp_ls_core.protocols import IDocument
     from pathlib import Path
 
     # i.e.: Importing a python library with capital letters fails #143
 
-    workspace.set_root("case4", libspec_manager=libspec_manager)
+    workspace.set_root_writable_dir(tmpdir, "case4", libspec_manager=libspec_manager)
     doc: IDocument = workspace.put_doc("case4.robot", text="")
     p = Path(doc.path)
     (p.parent / "myPythonKeywords.py").write_text(
@@ -949,7 +950,7 @@ def test_code_analysis_ignore_eq_after_slash(
 ):
     workspace.set_root("case_argspec_expand", libspec_manager=libspec_manager)
     doc = workspace.put_doc("case_argspec_expand.robot")
-    doc.source = """
+    doc.source = r"""
 *** Test Cases ***
 My Test Case 2
     My Keyword 2    options \= value
@@ -1057,6 +1058,35 @@ Some task
     _collect_errors(workspace, doc, data_regression)
 
 
+def test_code_analysis_deprecated_library(
+    workspace, libspec_manager, data_regression, tmpdir
+):
+    from robocorp_ls_core import uris
+
+    workspace.set_root_writable_dir(tmpdir, "case2", libspec_manager=libspec_manager)
+
+    my_lib_uri = workspace.get_doc_uri("my_lib.py")
+    p = Path(uris.to_fs_path(my_lib_uri))
+    p.write_text(
+        """
+class my_lib:
+    "*DEPRECATED*"
+    def lib_keyword(self):
+        pass
+"""
+    )
+    doc = workspace.put_doc("case2.robot")
+    doc.source = """
+*** Settings ***
+Library    ./my_lib.py
+
+*** Test Case ***
+Test    
+    lib keyword"""
+
+    _collect_errors(workspace, doc, data_regression)
+
+
 def test_code_analysis_none(workspace, libspec_manager, data_regression):
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.put_doc("case2.robot")
@@ -1141,7 +1171,6 @@ Something specified with type: ${type} and reference: ${reference}
 def test_code_analysis_ignore_report_undefined_variables(
     workspace, libspec_manager, data_regression
 ):
-
     from robotframework_ls.robot_config import RobotConfig
 
     workspace.set_root("case2", libspec_manager=libspec_manager)
@@ -1161,7 +1190,6 @@ Some test
 def test_code_analysis_ignore_report_undefined_environment_variables(
     workspace, libspec_manager, data_regression
 ):
-
     from robotframework_ls.robot_config import RobotConfig
 
     workspace.set_root("case2", libspec_manager=libspec_manager)
@@ -1214,7 +1242,7 @@ Attribute access
 """
 
     config = RobotConfig()
-    config.update({"robot.lint.ignoreVariables": ["user", "dict"]})
+    config.update({"robot.lint.ignoreVariables": ["user", "dict", "key"]})
     _collect_errors(workspace, doc, data_regression, config=config, basename="no_error")
 
 
@@ -1304,6 +1332,21 @@ Sample Keyword
     FOR    ${i}    IN     @{lst}
         Log    ${i}
     END
+"""
+
+    _collect_errors(workspace, doc, data_regression)
+
+
+@pytest.mark.skipif(
+    get_robot_major_version() <= 4, reason="RETURN only available from RF 5 onwards"
+)
+def test_var_undefinded_in_return(workspace, libspec_manager, data_regression):
+    workspace.set_root("case2", libspec_manager=libspec_manager)
+    doc = workspace.put_doc("case2.robot")
+    doc.source = """
+*** Keywords ***
+Sample Keyword
+    RETURN    ${value}
 """
 
     _collect_errors(workspace, doc, data_regression)
@@ -1445,7 +1488,7 @@ def test_vars_not_undefined(workspace, libspec_manager, data_regression):
     workspace.set_root("case2", libspec_manager=libspec_manager)
 
     doc = workspace.put_doc("case2.robot")
-    doc.source = """
+    doc.source = r"""
 *** Variables ***
 @{DEFAULT_LIST}     @{EMPTY}
 
@@ -1653,7 +1696,7 @@ def test_code_analysis_default_var_based_on_previous(
 ):
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.put_doc("case2.robot")
-    doc.source = """
+    doc.source = r"""
 *** Test Cases ***
 Demo
     Default With Variable Based On Earlier Argument
@@ -1796,7 +1839,7 @@ Test
 def test_vars_in_parameters_defined(workspace, libspec_manager, data_regression):
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.put_doc("case2.robot")
-    doc.source = """
+    doc.source = r"""
 *** Test Cases ***
 Example
     I execute "ls"
@@ -2207,7 +2250,6 @@ Template with kw with args 1
 def test_code_analysis_preference_to_robot_variables(
     workspace, libspec_manager, data_regression
 ):
-
     from robotframework_ls.robot_config import RobotConfig
     import os
 
@@ -2256,12 +2298,14 @@ def test_variables_curdir(workspace, libspec_manager, data_regression):
     _collect_errors(workspace, doc, data_regression, basename="no_error")
 
 
-def test_resolve_caches(workspace, libspec_manager, data_regression):
+def test_resolve_caches(workspace, libspec_manager, data_regression, tmpdir):
     import os
     import pathlib
     import threading
 
-    workspace.set_root("case_vars_file", libspec_manager=libspec_manager)
+    workspace.set_root_writable_dir(
+        tmpdir, "case_vars_file", libspec_manager=libspec_manager
+    )
     doc = workspace.put_doc("case_vars_curdir.robot")
 
     doc.source = """
@@ -2295,7 +2339,13 @@ Test
             ret.append(dct)
         return ret
 
-    _collect_errors(workspace, doc, data_regression, transform_errors=transform_errors)
+    _collect_errors(
+        workspace,
+        doc,
+        data_regression,
+        transform_errors=transform_errors,
+        basename="test_resolve_caches",
+    )
     event = threading.Event()
 
     def on_file_changed(src_path):
@@ -2315,8 +2365,14 @@ COMMON_2: 20
 """,
         encoding="utf-8",
     )
-    assert event.wait(5)
-    _collect_errors(workspace, doc, data_regression, basename="no_error")
+    workspace.ws.wait_for_check_done(8)
+    assert event.wait(2)
+    try:
+        _collect_errors(workspace, doc, data_regression, basename="no_error")
+    except Exception as e:
+        if not event.is_set():
+            raise AssertionError("Note: event not set in expected timeout.") from e
+        raise
 
 
 def test_duplicated_keywords_still_analyze_args(
@@ -2544,7 +2600,7 @@ def test_keyword_regexp(workspace, libspec_manager, data_regression):
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.put_doc("case.robot")
 
-    doc.source = """
+    doc.source = r"""
 *** Test Case ***
 My Test
     Today is Tuesday and tomorrow is Wednesday
@@ -2560,7 +2616,6 @@ Today is ${day1:\w\{6,9\}} and tomorrow is ${day2:\w{6,9}}
 def test_code_analysis_environment_variable_in_resource_import(
     workspace, libspec_manager, data_regression, found, monkeypatch
 ):
-
     if found:
         monkeypatch.setenv("ENV_VAR_IN_RESOURCE_IMPORT", "./my")
     else:
@@ -2620,6 +2675,73 @@ ${RESOURCES}    %{ENV_VAR_IN_RESOURCE_IMPORT}/bar
     )
 
 
+def test_code_analysis_arguments_correct(workspace, libspec_manager, data_regression):
+    workspace.set_root("case2", libspec_manager=libspec_manager)
+    doc = workspace.put_doc("keywords.robot")
+    doc.source = """
+*** Test Cases ***
+DemoCase
+    Run Keyword And Continue On Failure    Check Something    name=test
+
+*** Keywords ***
+Check Something
+    [Arguments]    ${name}
+    Fail    ${name}"""
+
+    _collect_errors(workspace, doc, data_regression, basename="no_error")
+
+
+def test_code_analysis_arguments_correct_2(workspace, libspec_manager, data_regression):
+    workspace.set_root("case2", libspec_manager=libspec_manager)
+    doc = workspace.put_doc("keywords.robot")
+    doc.source = """
+*** Test Cases ***
+Mandatory arguments
+    ${result} =    Kw Only Arg    kwo=value
+
+*** Keywords ***
+Kw Only Arg
+    [Arguments]    @{}    ${kwo}
+    [Return]    ${kwo}"""
+
+    _collect_errors(workspace, doc, data_regression, basename="no_error")
+
+
+def test_code_analysis_arguments_handling_of_starargs(
+    workspace, libspec_manager, data_regression, tmpdir
+):
+    workspace.set_root_writable_dir(tmpdir, "case2", libspec_manager=libspec_manager)
+    doc: IDocument = workspace.put_doc("case.robot", text="")
+    p = Path(doc.path)
+
+    (p.parent / "mypylib.py").write_text(
+        """
+def check_python_keyword(a, b="default", *varargs):
+    print(a, b, varargs)
+"""
+    )
+
+    doc.source = """
+*** Settings ***
+Library    ./mypylib.py
+
+*** Test Cases ***
+Call1
+    # This is wrong because a=ooops is not valid for Python as it'll set the a=ooops as a keyword argument.
+    Check Python Keyword    A    B   a=ooops
+    
+    # The same thing is valid for Robot Framework because a=ooops will be consumed as a single string.
+    Check RF Keyword    A    B   a=ooops
+
+*** Keywords ***
+Check RF Keyword
+    [Arguments]    ${A}    ${B}=1    @{C}
+    No operation
+    """
+
+    _collect_errors(workspace, doc, data_regression)
+
+
 def test_code_analysis_environment_variable_default_value(
     workspace, libspec_manager, data_regression, monkeypatch
 ):
@@ -2648,7 +2770,6 @@ ${RESOURCES}    %{ENV_VAR_IN_RESOURCE_IMPORT}/bar
 def test_code_analysis_environment_variable_in_resource_import_3(
     workspace, libspec_manager, data_regression
 ):
-
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.put_doc("my/bar/keywords.resource")
     doc.source = """
@@ -2672,7 +2793,6 @@ ${RESOURCES}    %{ENV_VAR_IN_RESOURCE_IMPORT}/bar
 def test_code_analysis_environment_variable_in_resource_import_4(
     workspace, libspec_manager, data_regression
 ):
-
     workspace.set_root("case2", libspec_manager=libspec_manager)
     doc = workspace.put_doc("my/bar/keywords.resource")
     doc.source = """
@@ -2716,6 +2836,32 @@ Keyword 2
     """
 
     _collect_errors(workspace, doc, data_regression, config=config)
+
+
+def test_code_analysis_no_unused_keyword(workspace, libspec_manager, data_regression):
+    from robotframework_ls.robot_config import RobotConfig
+    from robotframework_ls.impl.robot_generated_lsp_constants import (
+        OPTION_ROBOT_LINT_UNUSED_KEYWORD,
+    )
+
+    config = RobotConfig()
+    config.update({OPTION_ROBOT_LINT_UNUSED_KEYWORD: True})
+    libspec_manager.config = config
+
+    workspace.set_root("case2", libspec_manager=libspec_manager)
+    doc = workspace.put_doc("my.robot")
+    doc.source = """
+*** Test Cases ***
+My Test
+    my task 222
+
+
+*** Keywords ***
+My task ${something}
+    Log    ${something}
+    """
+
+    _collect_errors(workspace, doc, data_regression, config=config, basename="no_error")
 
 
 def test_code_analysis_unused_change(

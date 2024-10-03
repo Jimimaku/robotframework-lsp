@@ -1,7 +1,10 @@
-from robocorp_ls_core.protocols import IEndPoint, ActionResultDict, ActionResult
-from robocorp_ls_core.robotframework_log import get_logger
-from robocorp_code import commands
+from typing import Optional
+
 from robocorp_ls_core.command_dispatcher import _SubCommandDispatcher
+from robocorp_ls_core.protocols import ActionResult, ActionResultDict, IEndPoint
+from robocorp_ls_core.robotframework_log import get_logger
+
+from robocorp_code import commands
 from robocorp_code.protocols import IRcc
 
 log = get_logger(__name__)
@@ -31,7 +34,7 @@ class _Vault:
         commands.ROBOCORP_UPDATE_LAUNCH_ENV_GET_VAULT_ENV_INTERNAL
     )
     def _update_launch_env_get_vault_env_internal(
-        self, params: dict = None
+        self, params: Optional[dict] = None
     ) -> ActionResultDict:
         action_result: ActionResultDict = self._get_connected_vault_workspace()
         if not action_result["success"]:
@@ -63,7 +66,9 @@ class _Vault:
         ).as_dict()
 
     @vault_command_dispatcher(commands.ROBOCORP_GET_CONNECTED_VAULT_WORKSPACE_INTERNAL)
-    def _get_connected_vault_workspace(self, params: dict = None) -> ActionResultDict:
+    def _get_connected_vault_workspace(
+        self, params: Optional[dict] = None
+    ) -> ActionResultDict:
         try:
             info = self._dir_cache.load(self.VAULT_WORKSPACE_INFO_CACHE_KEY, dict)
             ret = {
@@ -80,7 +85,7 @@ class _Vault:
             ).as_dict()
 
         except Exception as e:
-            log.exception("Error loading VAULT_WORKSPACE_INFO.")
+            log.exception("Error loading WORKSPACE_INFO.")
             return ActionResult(False, str(e), None).as_dict()
 
     @vault_command_dispatcher(commands.ROBOCORP_SET_CONNECTED_VAULT_WORKSPACE_INTERNAL)

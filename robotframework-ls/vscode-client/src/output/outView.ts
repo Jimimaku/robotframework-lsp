@@ -1,8 +1,8 @@
 import { TextDecoder } from "util";
 import * as vscode from "vscode";
-import { OUTPUT_CHANNEL } from "../channel";
 import { debounce } from "../common";
 import { isFile, uriExists } from "../files";
+import { globalOutputViewState } from "./outViewRunIntegration";
 
 interface IContents {
     isPlaceholder: boolean;
@@ -48,7 +48,6 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (message) => {
             if (message.type == "event") {
                 if (message.event == "onClickReference") {
-                    // OUTPUT_CHANNEL.appendLine(JSON.stringify(message));
                     const data = message.data;
                     if (data) {
                         let source = data["source"];
@@ -69,20 +68,34 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
                             }
                         }
                     }
+                } else if (message.event === "onSetCurrentRunId") {
+                    const data = message.data;
+                    if (data) {
+                        globalOutputViewState.setCurrentRunId(data["runId"]);
+                    }
                 }
             }
         });
 
         webviewView.onDidChangeVisibility(() => {
+            if (!this.view || !this.view.visible) {
+                globalOutputViewState.setWebview(undefined);
+            } else {
+                globalOutputViewState.setWebview(this.view.webview);
+                globalOutputViewState.updateAfterVisible();
+            }
+
             // Can be used in dev to update the whole HTML instead of just the contents.
             // this.updateHTML(undefined);
             this.update();
         });
 
         webviewView.onDidDispose(() => {
+            globalOutputViewState.setWebview(undefined);
             this.view = undefined;
         });
 
+        globalOutputViewState.setWebview(this.view.webview);
         this.updateHTML(token);
     }
 
@@ -118,6 +131,7 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
             html = "Error loading HTML: " + error;
         }
         webviewView.webview.html = html;
+        globalOutputViewState.updateAfterVisible();
 
         this.update();
     }
@@ -150,7 +164,7 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
             this.loading = undefined;
 
             if (this.view && this.view.visible) {
-                this.setContentsInHTML(loadingEntry.cts.token, this.view.webview);
+                this.onUpdatedEditorSelection(loadingEntry.cts.token);
             }
         })();
 
@@ -169,9 +183,7 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
         ]);
     }
 
-    private async setContentsInHTML(token: vscode.CancellationToken, webview: vscode.Webview): Promise<IContents> {
-        OUTPUT_CHANNEL.appendLine("Robot Output webview: set contents in HTML.");
-
+    private async onUpdatedEditorSelection(token: vscode.CancellationToken): Promise<IContents> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             return;
@@ -201,14 +213,26 @@ export class RobotOutputViewProvider implements vscode.WebviewViewProvider {
             }
             text = converted;
         }
-        webview.postMessage({ type: "request", command: "setContents", "outputFileContents": text, "runId": filePath });
+        await globalOutputViewState.addRun(filePath, filePath, text);
     }
 }
 
 async function getLocalResourceRoot(extensionUri: vscode.Uri): Promise<vscode.Uri | undefined> {
     let localResourceRoot = vscode.Uri.joinPath(extensionUri, "src", "robotframework_ls", "vendored", "output-webview");
     if (!(await uriExists(localResourceRoot))) {
-        const checkUri = vscode.Uri.joinPath(extensionUri, "..", "robot-stream", "output-webview", "dist");
+        // In dev mode we expect the:
+        // "robotframework-output-stream"
+        // project to be checked out right next to the
+        // "robotframework-lsp"
+        // project.
+        const checkUri = vscode.Uri.joinPath(
+            extensionUri,
+            "..",
+            "..",
+            "robotframework-output-stream",
+            "output-webview",
+            "dist"
+        );
         if (!(await uriExists(checkUri))) {
             vscode.window.showErrorMessage(
                 "Unable to find robot output webview in:\n[" +

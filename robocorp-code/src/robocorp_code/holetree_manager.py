@@ -18,12 +18,12 @@ The structure goes as follows:
 
 Each request for a space name creates a structure in the disk such as:
 
-/vscode-01.lock     Lock file used, needed to write contents and generate the env. 
+/vscode-01.lock     Lock file used, needed to write contents and generate the env.
 /vscode-01          The directory name as well as the space name.
     /time           The last time that this space name was used.
     /conda.yaml     The contents used for the space name.
     /conda_path     The path to the conda file last used for this env.
-    /state          The current state name. 
+    /state          The current state name.
                     It's contents are one of:
                        'created'
                        'environment_requested'
@@ -36,17 +36,17 @@ Each request for a space name creates a structure in the disk such as:
                     and should be reclaimed after a timeout.
 """
 
+from pathlib import Path
+from typing import Iterable, List, Optional
 
-from robocorp_code.protocols import IRcc
 from robocorp_ls_core.robotframework_log import get_logger
 
-from pathlib import Path
-from typing import List, Optional, Iterable
+from robocorp_code.protocols import IRcc
 from robocorp_code.rcc_space_info import (
-    RCCSpaceInfo,
     CurrentSpaceStatus,
-    write_text,
+    RCCSpaceInfo,
     SpaceState,
+    write_text,
 )
 
 log = get_logger(__name__)
@@ -81,15 +81,7 @@ class HolotreeManager:
         self._rcc = rcc
         self.timeout_for_updates_in_seconds = timeout_for_updates_in_seconds
         if not directory:
-            robocorp_home_str = self._rcc.get_robocorp_home_from_settings()
-            if not robocorp_home_str:
-                from robocorp_code.rcc import get_default_robocorp_home_location
-
-                robocorp_home = get_default_robocorp_home_location()
-            else:
-                robocorp_home = Path(robocorp_home_str)
-
-            directory = robocorp_home / ".robocorp_code"
+            directory = self._rcc.get_robocorp_code_datadir()
 
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -117,6 +109,7 @@ class HolotreeManager:
         self, space_name: str, conda_yaml_path: Path, conda_yaml_contents: str
     ) -> RCCSpaceInfo:
         space_info: RCCSpaceInfo = self.create_rcc_space_info(space_name)
+
         conda_contents_path = space_info.conda_contents_path
         state_path = space_info.state_path
         conda_path = space_info.conda_path

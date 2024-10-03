@@ -1,4 +1,4 @@
-__version__ = "1.5.0"
+__version__ = "1.13.0"
 version_info = [int(x) for x in __version__.split(".")]
 
 import os.path
@@ -39,9 +39,9 @@ def import_robocorp_ls_core():
                     "Using vendored mode. Found: %s" % (vendored_folder,)
                 )
                 use_folder = vendored_folder
-                assert os.path.isdir(
-                    use_folder
-                ), "Expected: %s to exist and be a directory." % (use_folder,)
+                assert os.path.isdir(use_folder), (
+                    "Expected: %s to exist and be a directory." % (use_folder,)
+                )
 
             sys.path.append(use_folder)
             import robocorp_ls_core
@@ -66,26 +66,34 @@ def _import_helper(import_callback, project_name):
         try:
             src_folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             log_contents.append("Source folder: %s" % (src_folder,))
+
+            vendored_folder = os.path.join(src_folder, "robotframework_ls", "vendored")
+            log_contents.append(f"Using vendored mode. Found: {vendored_folder}")
+            use_folder = vendored_folder
+            assert os.path.isdir(
+                use_folder
+            ), f"Expected: {use_folder} to exist and be a directory."
+
+            if use_folder not in sys.path:
+                sys.path.append(use_folder)
+            try:
+                import_callback()
+            except ImportError:
+                log_contents.append(
+                    f"Unable to import {project_name} from vendored folder."
+                )
+
             check_path = [src_folder, "..", "..", project_name, "src"]
             src_core_folder = os.path.abspath(os.path.join(*check_path))
+            if not os.path.exists(src_core_folder):
+                check_path = [src_folder, "..", "..", "..", project_name, "src"]
+                src_core_folder = os.path.abspath(os.path.join(*check_path))
 
-            if os.path.isdir(src_core_folder):
-                log_contents.append("Dev mode detected. Found: %s" % (src_core_folder,))
-                use_folder = src_core_folder
+            log_contents.append(f"Dev mode detected. Using: {src_core_folder}")
+            use_folder = src_core_folder
 
-            else:
-                vendored_folder = os.path.join(
-                    src_folder, "robotframework_ls", "vendored"
-                )
-                log_contents.append(
-                    "Using vendored mode. Found: %s" % (vendored_folder,)
-                )
-                use_folder = vendored_folder
-                assert os.path.isdir(
-                    use_folder
-                ), "Expected: %s to exist and be a directory." % (use_folder,)
-
-            sys.path.append(use_folder)
+            if use_folder not in sys.path:
+                sys.path.append(use_folder)
             import_callback()
         except:
             try:
@@ -112,13 +120,20 @@ def import_rf_interactive():
     _import_helper(import_callback, "robotframework-interactive")
 
 
-def import_robot_stream():
+def import_robot_out_stream():
     """
-    Helper function to make sure that robot_stream is imported properly
+    Helper function to make sure that robot_out_stream is imported properly
     (either in dev or in release mode).
+
+    Note:
+    In dev mode we expect the:
+    "robotframework-output-stream"
+    project to be checked out right next to the
+    "robotframework-lsp"
+    project.
     """
 
     def import_callback():
-        import robot_stream
+        import robot_out_stream
 
-    _import_helper(import_callback, "robot-stream")
+    _import_helper(import_callback, "robotframework-output-stream")

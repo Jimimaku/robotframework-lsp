@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
 import { OUTPUT_CHANNEL } from "./channel";
-import { InspectorType, InspectorTypes } from "./inspector";
+import { InspectorType } from "./inspector";
+import { ActionResult } from "./protocols";
 import * as roboCommands from "./robocorpCommands";
-import { getSelectedRobot, LocatorEntry, RobotEntry } from "./viewsCommon";
+import { getSelectedRobot, LocatorEntry, NO_PACKAGE_FOUND_MSG, RobotEntry } from "./viewsCommon";
 
 export class LocatorsTreeDataProvider
     implements vscode.TreeDataProvider<LocatorEntry | LocatorEntryNode | LocatorCreationNode>
@@ -13,7 +14,7 @@ export class LocatorsTreeDataProvider
         if (!robotEntry) {
             return [
                 {
-                    name: "<Waiting for Robot Selection...>",
+                    name: NO_PACKAGE_FOUND_MSG,
                     type: "info",
                     line: 0,
                     column: 0,
@@ -56,33 +57,48 @@ export class LocatorsTreeDataProvider
             const treeItem = new vscode.TreeItem(node.caption);
             treeItem.collapsibleState = vscode.TreeItemCollapsibleState.None;
             treeItem.iconPath = new vscode.ThemeIcon("add");
+            let commandName: string;
+            if (node.locatorType === InspectorType.PlaywrightRecorder) {
+                commandName = roboCommands.ROBOCORP_OPEN_PLAYWRIGHT_RECORDER;
+                treeItem.command = {
+                    "title": node.caption,
+                    "command": commandName,
+                    "arguments": [true],
+                };
+            } else {
+                // Command: robocorp.newRobocorpInspectorBrowser
+                // Command: robocorp.newRobocorpInspectorImage
+                // Command: robocorp.newRobocorpInspectorWindows
+                // Command: robocorp.newRobocorpInspectorWebRecorder
+                commandName =
+                    "robocorp.newRobocorpInspector" +
+                    (node.locatorType.charAt(0).toUpperCase() + node.locatorType.substring(1)).replace("-r", "R");
+                treeItem.command = {
+                    "title": node.caption,
+                    "command": commandName,
+                    "arguments": [],
+                };
+            }
 
-            // Command: robocorp.newRobocorpInspectorBrowser
-            // Command: robocorp.newRobocorpInspectorImage
-            // Command: robocorp.newRobocorpInspectorWindows
-            let commandName =
-                "robocorp.newRobocorpInspector" +
-                node.locatorType.charAt(0).toUpperCase() +
-                node.locatorType.substring(1);
-            treeItem.command = {
-                "title": node.caption,
-                "command": commandName,
-                "arguments": [],
-            };
+            if (node.tooltip) {
+                treeItem.tooltip = node.tooltip;
+            }
             return treeItem;
         }
 
         const type: string = entry instanceof LocatorEntryNode ? entry.locatorType : entry.type;
         // https://microsoft.github.io/vscode-codicons/dist/codicon.html
         let iconPath = "file-media";
-        if (type === InspectorType.Browser) {
+        if (type === InspectorType.WebInspector) {
             iconPath = "globe";
-        } else if (type === InspectorType.Image) {
+        } else if (type === InspectorType.ImageInspector) {
             iconPath = "file-media";
-        } else if (type === InspectorType.Windows) {
+        } else if (type === InspectorType.WindowsInspector) {
             iconPath = "multiple-windows";
-        } else if (type === InspectorType.WebRecorder) {
-            iconPath = "globe";
+        } else if (type === InspectorType.JavaInspector) {
+            iconPath = "coffee";
+        } else if (type === InspectorType.PlaywrightRecorder) {
+            iconPath = "browser";
         } else if (type === "error" || type === "info") {
             iconPath = "error";
         } else {
@@ -93,16 +109,17 @@ export class LocatorsTreeDataProvider
             // Node which contains locators as children.
             const node = <LocatorEntryNode>entry;
             const treeItem = new vscode.TreeItem(node.caption);
-            treeItem.collapsibleState = vscode.TreeItemCollapsibleState.Expanded;
+            treeItem.collapsibleState = vscode.TreeItemCollapsibleState.Collapsed;
             treeItem.iconPath = new vscode.ThemeIcon(iconPath);
-            if (entry.locatorType === InspectorType.Browser) {
+            if (entry.locatorType === InspectorType.WebInspector) {
                 treeItem.contextValue = "newBrowserLocator";
-            } else if (entry.locatorType === InspectorType.Image) {
+                treeItem.tooltip = "Browser locators saved for future references";
+            } else if (entry.locatorType === InspectorType.ImageInspector) {
                 treeItem.contextValue = "newImageLocator";
-            } else if (entry.locatorType === InspectorType.Windows) {
+            } else if (entry.locatorType === InspectorType.WindowsInspector) {
                 treeItem.contextValue = "newWindowsLocator";
-            } else if (entry.locatorType === InspectorType.WebRecorder) {
-                treeItem.contextValue = "newWebRecorder";
+            } else if (entry.locatorType === InspectorType.JavaInspector) {
+                treeItem.contextValue = "newJavaLocator";
             }
             return treeItem;
         }
@@ -124,6 +141,7 @@ class LocatorEntryNode {
     locatorType: string;
     caption: string;
     hasCreateNew: boolean;
+    tooltip: string | undefined = undefined;
 
     constructor(locatorType: string, caption: string, hasCreateNew: boolean) {
         this.locatorType = locatorType;
@@ -133,7 +151,23 @@ class LocatorEntryNode {
 
     addCreateNewElement() {
         if (this.hasCreateNew) {
-            this.children.push(new LocatorCreationNode(this.locatorType, "New " + this.caption + " Locator ..."));
+            if (this.locatorType === InspectorType.PlaywrightRecorder) {
+                this.children.push(
+                    new LocatorCreationNode(
+                        this.locatorType,
+                        "Playwright Recorder (Python) ...",
+                        "A recorder which records browser actions to be used in Python with the `playwright` library."
+                    )
+                );
+                return;
+            }
+            this.children.push(
+                new LocatorCreationNode(
+                    this.locatorType,
+                    "New " + this.caption + " Locator ...",
+                    `Select and store in \`locators.json\` a locator to be used with the ${this.caption} library.`
+                )
+            );
         }
     }
 }
@@ -141,19 +175,23 @@ class LocatorEntryNode {
 class LocatorCreationNode {
     locatorType: string;
     caption: string;
+    tooltip: string | undefined;
 
-    constructor(locatorType: string, caption: string) {
+    constructor(locatorType: string, caption: string, tooltip: string | undefined = undefined) {
         this.locatorType = locatorType;
         this.caption = caption;
+        this.tooltip = tooltip;
     }
 }
 
 function buildTree(entries: LocatorEntry[]): any[] {
     // Roots may mix LocatorEntryNode along with LocatorEntry (if it's an error).
     const roots: any[] = [
-        new LocatorEntryNode(InspectorType.Browser, "Browser", true),
-        new LocatorEntryNode(InspectorType.Image, "Image", true),
-        new LocatorEntryNode(InspectorType.Windows, "Windows", true),
+        new LocatorEntryNode(InspectorType.WebInspector, "Web", true),
+        new LocatorEntryNode(InspectorType.WindowsInspector, "Windows", true),
+        new LocatorEntryNode(InspectorType.ImageInspector, "Image", true),
+        new LocatorEntryNode(InspectorType.JavaInspector, "Java", true),
+        new LocatorEntryNode(InspectorType.PlaywrightRecorder, "Playwright", true),
     ];
     const typeToElement = {};
     roots.forEach((element) => {

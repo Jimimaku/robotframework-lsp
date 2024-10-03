@@ -43,12 +43,12 @@ if sys.version_info[:2] < (3, 8):
     class Protocol(object):
         pass
 
-
 else:
     from typing import Protocol
 
 T = TypeVar("T")
 Y = TypeVar("Y", covariant=True)
+
 
 # We don't want to import robot in this case (just do it when type-checking).
 class IRobotToken(Protocol):
@@ -205,7 +205,6 @@ class NodeInfo(Generic[Y]):
 
 
 class TokenInfo:
-
     __slots__ = ["stack", "node", "token"]
 
     def __init__(self, stack: Tuple[INode, ...], node: INode, token: IRobotToken):
@@ -220,7 +219,6 @@ class TokenInfo:
 
 
 class AdditionalVarInfo:
-
     CONTEXT_UNDEFINED = 0
     CONTEXT_EXPRESSION = 1
 
@@ -262,7 +260,6 @@ class AdditionalVarInfo:
 
 
 class VarTokenInfo:
-
     __slots__ = ["stack", "node", "token", "var_info"]
 
     def __init__(
@@ -351,6 +348,7 @@ class ILibraryDoc(Protocol):
     inits: list
     doc_format: str
     keywords: List["IKeywordDoc"]
+    doc: str
 
 
 class ILibraryDocConversions(ILibraryDoc):
@@ -702,7 +700,6 @@ class AbstractKeywordCollector:
 
 
 class IDefinition(Protocol):
-
     keyword_name: str = ""  # Can be empty if it's not found as a keyword.
 
     # Note: Could be None (i.e.: we found it in a library spec file which doesn't have the source).
@@ -731,12 +728,10 @@ class IDefinition(Protocol):
 
 
 class IKeywordDefinition(IDefinition, Protocol):
-
     keyword_found: IKeywordFound
 
 
 class IVariableDefinition(IDefinition, Protocol):
-
     variable_found: "IVariableFound"
 
 
@@ -889,6 +884,11 @@ class IVariablesFromArgumentsFileLoader(Protocol):
         pass
 
 
+class IVariablesFromVariablesFileLoader(Protocol):
+    def get_variables(self) -> Tuple["IVariableFound", ...]:
+        pass
+
+
 class ILocalizationInfo(Protocol):
     def __init__(self, language_codes: Union[Tuple[str, ...], str]):
         pass
@@ -914,6 +914,8 @@ class ILocalizationInfo(Protocol):
 
 
 class ICompletionContext(Protocol):
+    tracing: bool
+
     def __init__(
         self,
         doc,
@@ -925,6 +927,9 @@ class ICompletionContext(Protocol):
         monitor: IMonitor = NULL,
         variables_from_arguments_files_loader: Sequence[
             IVariablesFromArgumentsFileLoader
+        ] = (),
+        variables_from_variables_files_loader: Sequence[
+            IVariablesFromVariablesFileLoader
         ] = (),
     ) -> None:
         pass
@@ -944,6 +949,12 @@ class ICompletionContext(Protocol):
     def variables_from_arguments_files_loader(
         self,
     ) -> Sequence[IVariablesFromArgumentsFileLoader]:
+        pass
+
+    @property
+    def variables_from_variables_files_loader(
+        self,
+    ) -> Sequence[IVariablesFromVariablesFileLoader]:
         pass
 
     @property
@@ -1037,6 +1048,11 @@ class ICompletionContext(Protocol):
     ) -> Dict[str, "IVariableFound"]:
         pass
 
+    def get_variables_files_normalized_var_name_to_var_found(
+        self,
+    ) -> Dict[str, "IVariableFound"]:
+        pass
+
     def get_current_variable(self, section=None) -> Optional[VarTokenInfo]:
         """
         Provides the current variable token. Note that it won't include '{' nor '}'.
@@ -1126,6 +1142,7 @@ class VariableKind:
     PYTHON = "Variable (python)"
     YAML = "Variable (yaml)"
     ARGUMENTS_FILE = "Arguments file"
+    VARIABLES_FILE = "Variables file"
     LOCAL_ASSIGN_VARIABLE = "Variable (local assign)"
     LOCAL_SET_VARIABLE = "Variable (local set)"
     TASK_SET_VARIABLE = "Variable (task set)"
@@ -1248,11 +1265,6 @@ class AbstractVariablesCollector:
         resolved_name: str,
     ):
         pass
-
-
-class EvaluatableExpressionTypedDict(TypedDict):
-    range: RangeTypedDict
-    expression: Optional[str]
 
 
 class IOnDependencyChanged(Protocol):

@@ -1,9 +1,13 @@
-from typing import List, Tuple, Iterator, Optional, Any
 import itertools
+import os
+from typing import List, Tuple, Iterator, Optional, Any
+
+from robocorp_ls_core.code_units import (
+    compute_utf16_code_units_len,
+    get_range_considering_utf16_code_units,
+)
 from robocorp_ls_core.protocols import IDocument
 from robotframework_ls.impl.protocols import ICompletionContext, IRobotToken
-import os
-
 from robotframework_ls.impl.robot_constants import (
     COMMENT,
     HEADER_TOKENS,
@@ -164,6 +168,8 @@ RF_TOKEN_TYPE_TO_TOKEN_TYPE_INDEX = {
     "variableOperator": TOKEN_TYPE_TO_INDEX["variableOperator"],
 }
 
+# INVALID HEADER was added in RF 6.1.
+RF_TOKEN_TYPE_TO_TOKEN_TYPE_INDEX["INVALID HEADER"] = TOKEN_TYPE_TO_INDEX["error"]
 
 for tok_type in HEADER_TOKENS:  # *** Settings ***, ...
     RF_TOKEN_TYPE_TO_TOKEN_TYPE_INDEX[tok_type] = TOKEN_TYPE_TO_INDEX["header"]
@@ -201,7 +207,6 @@ def _tokenize_changing_argument_to_type(tokenize_variables_generator, use_type):
 
 
 def _tokenize_variables(token: IRobotToken) -> Iterator[IRobotToken]:
-
     if token.type in (KEYWORD, ASSIGN):
         from robotframework_ls.impl import ast_utils
 
@@ -257,7 +262,6 @@ def _tokenize_token(
         )
 
         if not in_documentation:
-
             in_expression = is_node_with_expression_argument(node)
             if scope.keyword_usage_handler is not None:
                 tok_type = scope.keyword_usage_handler.get_token_type(use_token)
@@ -292,16 +296,18 @@ def _tokenize_token(
             scope, token_keyword
         )
         if token_gherkin_prefix:
-            yield token_gherkin_prefix, scope.get_index_from_internal_token_type(
-                token_gherkin_prefix.type
+            yield (
+                token_gherkin_prefix,
+                scope.get_index_from_internal_token_type(token_gherkin_prefix.type),
             )
 
         token_library_prefix, token_keyword = _extract_library_token_from_keyword(
             token_keyword, scope
         )
         if token_library_prefix:
-            yield token_library_prefix, scope.get_index_from_internal_token_type(
-                token_library_prefix.type
+            yield (
+                token_library_prefix,
+                scope.get_index_from_internal_token_type(token_library_prefix.type),
             )
 
         use_token = token_keyword
@@ -567,6 +573,7 @@ def semantic_tokens_full(context: ICompletionContext):
             scope.keyword_usage_handler = (
                 ast_utils_keyword_usage.obtain_keyword_usage_handler(stack, node)
             )
+            diff_in_line = 0
 
             for token in tokens:
                 for token_part, token_type_index in _tokenize_token(node, token, scope):
@@ -575,21 +582,58 @@ def semantic_tokens_full(context: ICompletionContext):
                         lineno = 0
                     append(lineno - last_line)
                     if lineno != last_line:
+                        diff_in_line = 0
                         last_column = token_part.col_offset
                         if last_column < 0:
                             last_column = 0
                         append(last_column)
                     else:
-                        col_delta = token_part.col_offset - last_column
+                        col_delta = token_part.col_offset + diff_in_line - last_column
                         append(col_delta)
                         last_column += col_delta
 
-                    append(token_part.end_col_offset - token_part.col_offset)  # len
+                    len_unicode = len(token_part.value)
+                    len_bytes = compute_utf16_code_units_len(token_part.value)
+                    append(len_bytes)
+                    diff_in_line += len_bytes - len_unicode
                     append(token_type_index)
                     append(0)  # i.e.: no modifier
                     last_line = lineno
 
     return ret
+
+
+def iter_decoded_semantic_tokens(semantic_tokens_as_int: List[int]):
+    if not semantic_tokens_as_int:
+        return
+
+    ints_iter = iter(semantic_tokens_as_int)
+    line = 0
+    col = 0
+    while True:
+        try:
+            line_delta = next(ints_iter)
+        except StopIteration:
+            return
+        col_delta = next(ints_iter)
+        token_len = next(ints_iter)
+        token_type = next(ints_iter)
+        token_modifier = next(ints_iter)
+        line += line_delta
+        if line_delta == 0:
+            col += col_delta
+        else:
+            col = col_delta
+
+        yield {
+            "line": line,
+            "col": col,
+            "line_delta": line_delta,
+            "col_delta": col_delta,
+            "len": token_len,
+            "type": token_type,
+            "modifier": token_modifier,
+        }
 
 
 def decode_semantic_tokens(
@@ -617,7 +661,10 @@ def decode_semantic_tokens(
         else:
             col = col_delta
 
-        s = doc.get_line(line)[col : col + token_len]
+        # s = doc.get_line(line)[col : col + token_len]
+        s = doc.get_line(line)
+        s = get_range_considering_utf16_code_units(s, col, col + token_len)
+
         ret.append((s, TOKEN_TYPES[token_type]))
         if stream is not None:
             print(">>", s, "<<", file=stream)

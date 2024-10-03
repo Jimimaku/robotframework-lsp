@@ -1,15 +1,14 @@
 import {
     TREE_VIEW_ROBOCORP_CLOUD_TREE,
-    TREE_VIEW_ROBOCORP_ROBOT_CONTENT_TREE,
-    TREE_VIEW_ROBOCORP_ROBOTS_TREE,
-    TREE_VIEW_ROBOCORP_RESOURCES_TREE,
+    TREE_VIEW_ROBOCORP_PACKAGE_CONTENT_TREE,
+    TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE,
+    TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE,
 } from "./robocorpViews";
 import * as vscode from "vscode";
 import { ExtensionContext } from "vscode";
 import { runRobotRCC, uploadRobot } from "./activities";
 import { createRccTerminal } from "./rccTerminal";
 import { RobotContentTreeDataProvider } from "./viewsRobotContent";
-import { WorkItemsTreeDataProvider } from "./viewsWorkItems";
 import {
     debounce,
     getSelectedRobot,
@@ -23,13 +22,26 @@ import {
 } from "./viewsCommon";
 import { CloudTreeDataProvider } from "./viewsRobocorp";
 import { RobotsTreeDataProvider } from "./viewsRobots";
-import { LocatorsTreeDataProvider } from "./viewsLocators";
 import { ResourcesTreeDataProvider } from "./viewsResources";
 import * as path from "path";
-import { verifyFileExists } from "./files";
+import { fileExists, uriExists, verifyFileExists } from "./files";
+import { createDefaultInputJson, getTargetInputJson, runActionFromActionPackage } from "./robo/actionPackage";
 
 function empty<T>(array: readonly T[]) {
     return array === undefined || array.length === 0;
+}
+
+export async function editInput(actionRobotEntry?: RobotEntry) {
+    if (!actionRobotEntry) {
+        vscode.window.showErrorMessage("Unable to edit input: no target action entry defined for action.");
+        return;
+    }
+    const targetInput = await getTargetInputJson(actionRobotEntry.actionName, actionRobotEntry.robot.directory);
+    const inputUri = vscode.Uri.file(targetInput);
+    if (!(await fileExists(targetInput))) {
+        await createDefaultInputJson(inputUri);
+    }
+    await vscode.window.showTextDocument(inputUri);
 }
 
 export async function openRobotTreeSelection(robot?: RobotEntry) {
@@ -51,7 +63,30 @@ export async function openRobotCondaTreeSelection(robot?: RobotEntry) {
             const condaConfigFile = yamlContents["condaConfigFile"];
             if (condaConfigFile) {
                 vscode.window.showTextDocument(vscode.Uri.file(path.join(robot.robot.directory, condaConfigFile)));
+                return;
             }
+        }
+
+        // It didn't return: let's just check for a conda.yaml.
+        const condaYamlPath = path.join(robot.robot.directory, "conda.yaml");
+        const condaYamlUri = vscode.Uri.file(condaYamlPath);
+        if (await uriExists(condaYamlUri)) {
+            vscode.window.showTextDocument(condaYamlUri);
+            return;
+        }
+    }
+}
+
+export async function openPackageTreeSelection(robot?: RobotEntry) {
+    if (!robot) {
+        robot = getSelectedRobot();
+    }
+    if (robot) {
+        const packageYamlPath = path.join(robot.robot.directory, "package.yaml");
+        const packageYamlUri = vscode.Uri.file(packageYamlPath);
+        if (await uriExists(packageYamlUri)) {
+            vscode.window.showTextDocument(packageYamlUri);
+            return;
         }
     }
 }
@@ -88,11 +123,49 @@ export async function createRccTerminalTreeSelection(robot?: RobotEntry) {
 export async function runSelectedRobot(noDebug: boolean, taskRobotEntry?: RobotEntry) {
     if (!taskRobotEntry) {
         taskRobotEntry = await getSelectedRobot({
-            noSelectionMessage: "Unable to make launch (Robot task not selected in Robots Tree).",
+            noSelectionMessage: "Unable to make launch (Task not selected in Packages Tree).",
             moreThanOneSelectionMessage: "Unable to make launch -- only 1 task must be selected.",
         });
     }
     runRobotRCC(noDebug, taskRobotEntry.robot.filePath, taskRobotEntry.taskName);
+}
+
+export async function openAction(actionRobotEntry?: RobotEntry) {
+    const range = actionRobotEntry.range;
+    if (range) {
+        const selection: vscode.Range = new vscode.Range(
+            new vscode.Position(range.start.line - 1, range.start.character),
+            new vscode.Position(range.end.line - 1, range.end.character)
+        );
+        await vscode.window.showTextDocument(actionRobotEntry.uri, { selection: selection });
+    } else {
+        await vscode.window.showTextDocument(actionRobotEntry.uri);
+    }
+}
+
+export async function runSelectedAction(noDebug: boolean, actionRobotEntry?: RobotEntry) {
+    if (!actionRobotEntry) {
+        actionRobotEntry = await getSelectedRobot({
+            noSelectionMessage: "Unable to make launch (Action not selected in Packages Tree).",
+            moreThanOneSelectionMessage: "Unable to make launch -- only 1 action must be selected.",
+        });
+        if (!actionRobotEntry) {
+            return;
+        }
+    }
+
+    if (!actionRobotEntry.actionName) {
+        vscode.window.showErrorMessage("actionName not available in entry to launch.");
+        return;
+    }
+
+    await runActionFromActionPackage(
+        noDebug,
+        actionRobotEntry.actionName,
+        actionRobotEntry.robot.directory,
+        actionRobotEntry.robot.filePath,
+        actionRobotEntry.uri
+    );
 }
 
 async function onChangedRobotSelection(
@@ -150,11 +223,11 @@ export function registerViews(context: ExtensionContext) {
 
     // Robots (i.e.: list of robots, not its contents)
     let robotsTreeDataProvider = new RobotsTreeDataProvider();
-    let robotsTree = vscode.window.createTreeView(TREE_VIEW_ROBOCORP_ROBOTS_TREE, {
+    let robotsTree = vscode.window.createTreeView(TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE, {
         "treeDataProvider": robotsTreeDataProvider,
     });
-    treeViewIdToTreeView.set(TREE_VIEW_ROBOCORP_ROBOTS_TREE, robotsTree);
-    treeViewIdToTreeDataProvider.set(TREE_VIEW_ROBOCORP_ROBOTS_TREE, robotsTreeDataProvider);
+    treeViewIdToTreeView.set(TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE, robotsTree);
+    treeViewIdToTreeDataProvider.set(TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE, robotsTreeDataProvider);
 
     context.subscriptions.push(
         robotsTree.onDidChangeSelection(
@@ -187,11 +260,11 @@ export function registerViews(context: ExtensionContext) {
 
     // The contents of a single robot (the one selected in the Robots tree).
     let robotContentTreeDataProvider = new RobotContentTreeDataProvider();
-    let robotContentTree = vscode.window.createTreeView(TREE_VIEW_ROBOCORP_ROBOT_CONTENT_TREE, {
+    let robotContentTree = vscode.window.createTreeView(TREE_VIEW_ROBOCORP_PACKAGE_CONTENT_TREE, {
         "treeDataProvider": robotContentTreeDataProvider,
     });
-    treeViewIdToTreeView.set(TREE_VIEW_ROBOCORP_ROBOT_CONTENT_TREE, robotContentTree);
-    treeViewIdToTreeDataProvider.set(TREE_VIEW_ROBOCORP_ROBOT_CONTENT_TREE, robotContentTreeDataProvider);
+    treeViewIdToTreeView.set(TREE_VIEW_ROBOCORP_PACKAGE_CONTENT_TREE, robotContentTree);
+    treeViewIdToTreeDataProvider.set(TREE_VIEW_ROBOCORP_PACKAGE_CONTENT_TREE, robotContentTreeDataProvider);
 
     context.subscriptions.push(
         onSelectedRobotChanged((e) => robotContentTreeDataProvider.onRobotsTreeSelectionChanged(e))
@@ -204,12 +277,12 @@ export function registerViews(context: ExtensionContext) {
 
     // Resources
     let resourcesDataProvider = new ResourcesTreeDataProvider();
-    let resourcesTree = vscode.window.createTreeView(TREE_VIEW_ROBOCORP_RESOURCES_TREE, {
+    let resourcesTree = vscode.window.createTreeView(TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE, {
         "treeDataProvider": resourcesDataProvider,
         "canSelectMany": true,
     });
-    treeViewIdToTreeView.set(TREE_VIEW_ROBOCORP_RESOURCES_TREE, resourcesTree);
-    treeViewIdToTreeDataProvider.set(TREE_VIEW_ROBOCORP_RESOURCES_TREE, resourcesDataProvider);
+    treeViewIdToTreeView.set(TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE, resourcesTree);
+    treeViewIdToTreeDataProvider.set(TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE, resourcesDataProvider);
 
     context.subscriptions.push(onSelectedRobotChanged((e) => resourcesDataProvider.onRobotsTreeSelectionChanged(e)));
 
@@ -218,7 +291,7 @@ export function registerViews(context: ExtensionContext) {
     let onChangeRobotsYaml = debounce(() => {
         // Note: this doesn't currently work if the parent folder is renamed or removed.
         // (https://github.com/microsoft/vscode/pull/110858)
-        refreshTreeView(TREE_VIEW_ROBOCORP_ROBOTS_TREE);
+        refreshTreeView(TREE_VIEW_ROBOCORP_TASK_PACKAGES_TREE);
     }, 300);
 
     robotsWatcher.onDidChange(onChangeRobotsYaml);
@@ -230,7 +303,7 @@ export function registerViews(context: ExtensionContext) {
     let onChangeLocatorsJson = debounce(() => {
         // Note: this doesn't currently work if the parent folder is renamed or removed.
         // (https://github.com/microsoft/vscode/pull/110858)
-        refreshTreeView(TREE_VIEW_ROBOCORP_RESOURCES_TREE);
+        refreshTreeView(TREE_VIEW_ROBOCORP_PACKAGE_RESOURCES_TREE);
     }, 300);
 
     locatorsWatcher.onDidChange(onChangeLocatorsJson);

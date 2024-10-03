@@ -1,16 +1,34 @@
 import logging
 import os.path
 import sys
+import time
+import typing
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import pytest
+from robocorp_code_tests.fixtures import RccPatch
+from robocorp_code_tests.protocols import IRobocorpLanguageServerClient
+from robocorp_ls_core.basic import wait_for_condition
+from robocorp_ls_core.callbacks import Callback
+from robocorp_ls_core.ep_resolve_interpreter import (
+    DefaultInterpreterInfo,
+    IInterpreterInfo,
+)
+from robocorp_ls_core.pluginmanager import PluginManager
+from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
+
+from robocorp_code.inspector.common import (
+    STATE_CLOSED,
+    STATE_NOT_PICKING,
+    STATE_OPENED,
+    STATE_PICKING,
+)
 from robocorp_code.protocols import (
+    ActionResult,
     LocalRobotMetadataInfoDict,
     WorkspaceInfoDict,
-    ActionResult,
 )
-from typing import List
-import time
-from robocorp_code_tests.protocols import IRobocorpLanguageServerClient
-from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
-from robocorp_code_tests.fixtures import RccPatch
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +36,8 @@ log = logging.getLogger(__name__)
 def test_missing_message(
     language_server: IRobocorpLanguageServerClient, ws_root_path, initialization_options
 ):
+    from robocorp_ls_core.protocols import IErrorMessage
+
     language_server.initialize(
         ws_root_path, initialization_options=initialization_options
     )
@@ -32,13 +52,18 @@ def test_missing_message(
     )
 
     # Make sure that we have a response if it's a request (i.e.: it has an id).
-    msg = language_server.request(
-        {
-            "jsonrpc": "2.0",
-            "id": "22",
-            "method": "invalidMessageSent",
-            "params": {"textDocument": {"uri": "untitled:Untitled-1", "version": 2}},
-        }
+    msg = typing.cast(
+        IErrorMessage,
+        language_server.request(
+            {
+                "jsonrpc": "2.0",
+                "id": "22",
+                "method": "invalidMessageSent",
+                "params": {
+                    "textDocument": {"uri": "untitled:Untitled-1", "version": 2}
+                },
+            }
+        ),
     )
 
     assert msg["error"]["code"] == -32601
@@ -53,9 +78,8 @@ def test_exit_with_parent_process_died(
     """
     :note: Only check with the language_server_io (because that's in another process).
     """
+    from robocorp_ls_core.basic import is_process_alive, kill_process_and_subprocesses
     from robocorp_ls_core.subprocess_wrapper import subprocess
-    from robocorp_ls_core.basic import is_process_alive
-    from robocorp_ls_core.basic import kill_process_and_subprocesses
     from robocorp_ls_core.unittest_tools.fixtures import wait_for_test_condition
 
     language_server = language_server_io
@@ -95,8 +119,8 @@ def test_list_rcc_robot_templates(
     )["result"]
     assert result["success"]
     template_names = [template["name"] for template in result["result"]]
-    assert "standard" in template_names
-    assert "python" in template_names
+    assert "01-python" in template_names
+    assert "11-rfw-standard" in template_names
 
     target = str(tmpdir.join("dest"))
     language_server.change_workspace_folders(added_folders=[target], removed_folders=[])
@@ -117,7 +141,7 @@ def test_list_rcc_robot_templates(
     # Error
     result = language_server.execute_command(
         commands.ROBOCORP_CREATE_ROBOT_INTERNAL,
-        [{"directory": target, "name": "example", "template": "standard"}],
+        [{"directory": target, "name": "example", "template": "01-python"}],
     )["result"]
     assert not result["success"]
     assert "Error creating robot" in result["message"]
@@ -126,7 +150,7 @@ def test_list_rcc_robot_templates(
 
     result = language_server.execute_command(
         commands.ROBOCORP_CREATE_ROBOT_INTERNAL,
-        [{"directory": ws_root_path, "name": "example2", "template": "standard"}],
+        [{"directory": ws_root_path, "name": "example2", "template": "01-python"}],
     )["result"]
     assert result["success"]
 
@@ -225,7 +249,6 @@ def test_cloud_list_workspaces_basic(
     rcc_patch: RccPatch,
     data_regression,
 ):
-
     client = language_server_initialized
 
     rcc_patch.apply()
@@ -254,7 +277,6 @@ def test_cloud_list_workspaces_errors_single_ws_not_available(
     rcc_patch: RccPatch,
     data_regression,
 ):
-
     client = language_server_initialized
 
     def custom_handler(args, *sargs, **kwargs):
@@ -286,7 +308,6 @@ def test_cloud_list_workspaces_errors_single_ws_not_available(
 def test_cloud_list_workspaces_errors_no_ws_available(
     language_server_initialized: IRobocorpLanguageServerClient, rcc_patch: RccPatch
 ):
-
     client = language_server_initialized
 
     def custom_handler(args, *sargs, **kwargs):
@@ -352,7 +373,7 @@ def test_upload_to_cloud(
     found_package: PackageInfoDict = found_packages[0]
     result = client.execute_command(
         commands.ROBOCORP_CREATE_ROBOT_INTERNAL,
-        [{"directory": ws_root_path, "name": "example", "template": "standard"}],
+        [{"directory": ws_root_path, "name": "example", "template": "01-python"}],
     )["result"]
     assert result["success"]
 
@@ -476,12 +497,15 @@ def test_compute_robot_launch_from_robocorp_code_launch(
     assert result["success"]
     r = result["result"]
 
-    assert os.path.samefile(
-        r["target"], cases.get_path("custom_envs/simple-web-scraper/tasks")
-    )
+    assert r["target"] == "<target-in-args>"
     assert os.path.samefile(r["cwd"], cases.get_path("custom_envs/simple-web-scraper"))
+    assert os.path.samefile(
+        cases.get_path("custom_envs/simple-web-scraper/tasks"),
+        os.path.join(r["cwd"], r["args"][-1]),
+    )
     del r["target"]
     del r["cwd"]
+    r["args"].pop(-1)
 
     assert r == {
         "type": "robotframework-lsp",
@@ -524,8 +548,174 @@ def test_compute_python_launch_from_robocorp_code_launch(
     }
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="As the base platform changes so does the result."
+)
+def test_hover_conda_yaml_conda_forge_versions(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    data_regression,
+    patch_pypi_cloud,
+    patch_conda_forge_cloud_setup,
+):
+    from robocorp_ls_core.workspace import Document
+
+    client = language_server_initialized
+    uri = "x/y/conda.yaml"
+    txt = """
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.7
+  - pip=22.1.2
+  - mu_repo=1.8.2"""
+    doc = Document("", txt)
+    client.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+    col -= 10
+    ret = client.hover(uri, line, col)
+    data_regression.check(ret["result"])
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="As the base platform changes so does the result."
+)
+def test_hover_package_yaml_conda_forge_versions(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    data_regression,
+    patch_pypi_cloud,
+    patch_conda_forge_cloud_setup,
+):
+    from robocorp_ls_core.workspace import Document
+
+    client = language_server_initialized
+    uri = "x/y/package.yaml"
+    txt = """
+name: Name
+description: Action package description
+version: 0.0.1
+documentation: https://github.com/...
+dependencies:
+  conda-forge:
+  - python=3.7
+  - pip=22.1.2
+  - mu_repo=1.8.2"""
+    doc = Document("", txt)
+    client.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+    col -= 10
+    ret = client.hover(uri, line, col)
+    data_regression.check(ret["result"])
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="As the base platform changes so does the result."
+)
+def test_hover_conda_yaml_conda_forge_numpy_versions(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    data_regression,
+    patch_pypi_cloud,
+):
+    from robocorp_ls_core.workspace import Document
+
+    client = language_server_initialized
+    uri = "x/y/conda.yaml"
+    txt = """
+channels:
+  - conda-forge
+
+dependencies:
+  - numpy"""
+    doc = Document("", txt)
+    client.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+    col -= 2
+    ret = client.hover(uri, line, col)
+    data_regression.check(ret["result"])
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="As the base platform changes so does the result."
+)
+def test_hover_conda_yaml_conda_forge_python_versions(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    data_regression,
+    patch_pypi_cloud,
+):
+    from robocorp_ls_core.workspace import Document
+
+    client = language_server_initialized
+    uri = "x/y/conda.yaml"
+    txt = """
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.9"""
+    doc = Document("", txt)
+    client.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+    col -= 7
+    ret = client.hover(uri, line, col)
+    data_regression.check(ret["result"])
+
+
+def test_hover_conda_yaml_pypi_versions(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    data_regression,
+    patch_pypi_cloud,
+):
+    from robocorp_ls_core.workspace import Document
+
+    client = language_server_initialized
+    uri = "x/y/conda.yaml"
+    txt = """
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.7               # https://pyreadiness.org/3.9/
+  - pip=22.1.2                  # https://pip.pypa.io/en/stable/news/
+  - pip:
+      # Define pip packages here -> https://pypi.org/
+      - rpaframework==22.5.3"""
+    doc = Document("", txt)
+    client.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+    col -= 10
+    ret = client.hover(uri, line, col)
+    data_regression.check(ret["result"])
+
+
+def test_hover_conda_yaml_versions_no_releases(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    data_regression,
+    patch_pypi_cloud_no_releases_12_months,
+):
+    from robocorp_ls_core.workspace import Document
+
+    client = language_server_initialized
+    uri = "x/y/conda.yaml"
+    txt = """
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.7               # https://pyreadiness.org/3.9/
+  - pip=22.1.2                  # https://pip.pypa.io/en/stable/news/
+  - pip:
+      # Define pip packages here -> https://pypi.org/
+      - rpaframework==22.5.3"""
+    doc = Document("", txt)
+    client.open_doc(uri, 1, txt)
+    line, col = doc.get_last_line_col()
+    col -= 10
+    ret = client.hover(uri, line, col)
+    data_regression.check(ret["result"])
+
+
 def test_hover_browser_integration(
-    language_server_initialized: IRobocorpLanguageServerClient, cases: CasesFixture
+    language_server_initialized: IRobocorpLanguageServerClient,
 ):
     from robocorp_ls_core.workspace import Document
 
@@ -553,10 +743,11 @@ def test_hover_browser_integration(
 def test_hover_image_integration(
     language_server_initialized: IRobocorpLanguageServerClient, tmpdir
 ):
-    from robocorp_ls_core.workspace import Document
-    from robocorp_code_tests.fixtures import IMAGE_IN_BASE64
     import base64
+
+    from robocorp_code_tests.fixtures import IMAGE_IN_BASE64
     from robocorp_ls_core import uris
+    from robocorp_ls_core.workspace import Document
 
     locators_json = tmpdir.join("locators.json")
     locators_json.write_text("", "utf-8")
@@ -597,7 +788,6 @@ def test_hover_image_integration(
 def test_obtain_locator_info(
     language_server_initialized: IRobocorpLanguageServerClient, tmpdir, data_regression
 ) -> None:
-
     from robocorp_code import commands
 
     # robot.yaml contents don't matter for this test (it just needs to be there).
@@ -643,9 +833,9 @@ def test_obtain_locator_info(
 def test_remove_locator(
     language_server_initialized: IRobocorpLanguageServerClient, tmpdir, data_regression
 ) -> None:
+    import json
 
     from robocorp_code import commands
-    import json
 
     # robot.yaml contents don't matter for this test (it just needs to be there).
     robot_yaml = tmpdir.join("robot.yaml")
@@ -724,7 +914,6 @@ def test_internal_load_locators_db(
 
 
 def test_metric(language_server_initialized: IRobocorpLanguageServerClient) -> None:
-
     from robocorp_code import commands
 
     language_server = language_server_initialized
@@ -753,7 +942,23 @@ def sort_diagnostics(diagnostics):
     return sorted(diagnostics, key=key)
 
 
-def test_lint_robot_integration(
+def filter_diagnostics(diagnostics):
+    ret = []
+    for diag in diagnostics:
+        # Filter out some diagnostics.
+        if "SSL_CERT_FILE is set to" in diag["message"]:
+            continue
+
+        if "Dependencies drift file" in diag["message"]:
+            continue
+
+        if "PLAYWRIGHT_BROWSERS_PATH" in diag["message"]:
+            continue
+        ret.append(diag)
+    return ret
+
+
+def test_lint_robot_integration_rcc(
     language_server_initialized: IRobocorpLanguageServerClient, tmpdir, data_regression
 ):
     from robocorp_ls_core import uris
@@ -791,8 +996,441 @@ dependencies:
     message_matcher = language_server.obtain_pattern_message_matcher(
         {"method": "textDocument/publishDiagnostics"}
     )
+    assert message_matcher
     language_server.open_doc(robot_yaml_uri, 1, robot_yaml_text)
 
     assert message_matcher.event.wait(TIMEOUT)
     diag = message_matcher.msg["params"]["diagnostics"]
+    data_regression.check(filter_diagnostics(sort_diagnostics(diag)))
+
+
+@pytest.fixture
+def disable_rcc_diagnostics():
+    from robocorp_code._lint import DiagnosticsConfig
+
+    DiagnosticsConfig.analyze_rcc = False
+    yield
+    DiagnosticsConfig.analyze_rcc = True
+
+
+def test_profile_import(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    datadir,
+    disable_rcc_diagnostics,
+):
+    from robocorp_ls_core import uris
+
+    from robocorp_code.commands import (
+        ROBOCORP_GET_PY_PI_BASE_URLS_INTERNAL,
+        ROBOCORP_PROFILE_IMPORT_INTERNAL,
+        ROBOCORP_PROFILE_LIST_INTERNAL,
+        ROBOCORP_PROFILE_SWITCH_INTERNAL,
+    )
+
+    result = language_server_initialized.execute_command(
+        ROBOCORP_GET_PY_PI_BASE_URLS_INTERNAL,
+        [],
+    )["result"]
+    assert result == ["https://pypi.org"]
+
+    # Import sample profile.
+    sample_profile = datadir / "sample_profile.yml"
+    result = language_server_initialized.execute_command(
+        ROBOCORP_PROFILE_IMPORT_INTERNAL,
+        [{"profileUri": uris.from_fs_path(str(sample_profile))}],
+    )["result"]
+    assert result["success"]
+
+    # List profiles
+    result = language_server_initialized.execute_command(
+        ROBOCORP_PROFILE_LIST_INTERNAL,
+        [],
+    )["result"]
+    assert result["success"]
+    loaded_profiles = result["result"]
+    assert "sample" in loaded_profiles["profiles"]
+    current = loaded_profiles["current"]
+    if current.lower() == "default":
+        current = "<remove-current-back-to-defaults>"
+
+    try:
+        result = language_server_initialized.execute_command(
+            ROBOCORP_PROFILE_SWITCH_INTERNAL,
+            [{"profileName": "sample"}],
+        )["result"]
+        assert result["success"]
+
+        result = language_server_initialized.execute_command(
+            ROBOCORP_GET_PY_PI_BASE_URLS_INTERNAL,
+            [],
+        )["result"]
+        assert result == ["https://test.pypi.org", "https://pypi.org"]
+
+    finally:
+        result = language_server_initialized.execute_command(
+            ROBOCORP_PROFILE_SWITCH_INTERNAL,
+            [{"profileName": current}],
+        )["result"]
+        assert result["success"]
+
+
+def test_lint_robot_integration_deps(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    tmpdir,
+    data_regression,
+    disable_rcc_diagnostics,
+):
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.unittest_tools.fixtures import TIMEOUT
+
+    robot_yaml = tmpdir.join("robot.yaml")
+    robot_yaml_text = """
+tasks:
+  Obtain environment information:
+    command:
+      - python
+      - get_env_info.py
+
+artifactsDir: output
+
+condaConfigFile: conda.yaml
+
+"""
+    robot_yaml.write_text(robot_yaml_text, "utf-8")
+
+    conda_yaml = tmpdir.join("conda.yaml")
+    conda_yaml_text = """
+    channels:
+      - conda-forge
+    dependencies:
+      - python=3.7
+      - pip=22
+    """
+    conda_yaml.write_text(
+        conda_yaml_text,
+        "utf-8",
+    )
+
+    language_server = language_server_initialized
+    conda_yaml_uri = uris.from_fs_path(str(conda_yaml))
+    message_matcher = language_server.obtain_pattern_message_matcher(
+        {"method": "textDocument/publishDiagnostics"}
+    )
+    assert message_matcher
+    language_server.open_doc(conda_yaml_uri, 1, conda_yaml_text)
+
+    assert message_matcher.event.wait(TIMEOUT)
+    diag = message_matcher.msg["params"]["diagnostics"]
     data_regression.check(sort_diagnostics(diag))
+
+
+def test_lint_action_package_integration_deps(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    tmpdir,
+    data_regression,
+    disable_rcc_diagnostics,
+):
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.unittest_tools.fixtures import TIMEOUT
+
+    conda_yaml = tmpdir.join("package.yaml")
+    conda_yaml_text = """
+# Bad: missing
+# documentation: 
+# version:
+# description:
+
+dependencies:
+  conda-forge:
+  - python=3.10.12
+  - pip=23.2.1
+  - robocorp-truststore=0.8.0
+  pypi:
+  - rpaframework=28.3.0 # https://rpaframework.org/releasenotes.html
+  - robocorp=1.6.2 # https://pypi.org/project/robocorp
+  - robocorp-actions=0.0.7
+  - pandas==2.2.1 # Bad, == not supported.
+  pip: # Bad: pip should not be here.
+  - some-pack=1.1
+    """
+    conda_yaml.write_text(
+        conda_yaml_text,
+        "utf-8",
+    )
+
+    language_server = language_server_initialized
+    conda_yaml_uri = uris.from_fs_path(str(conda_yaml))
+    message_matcher = language_server.obtain_pattern_message_matcher(
+        {"method": "textDocument/publishDiagnostics"}
+    )
+    assert message_matcher
+    language_server.open_doc(conda_yaml_uri, 1, conda_yaml_text)
+
+    assert message_matcher.event.wait(TIMEOUT)
+    diag = message_matcher.msg["params"]["diagnostics"]
+    print(diag)
+    # data_regression.check(sort_diagnostics(diag))
+
+
+class ResolveInterpreterCurrentEnv:
+    def get_interpreter_info_for_doc_uri(self, doc_uri) -> Optional[IInterpreterInfo]:
+        """
+        Provides a customized interpreter for a given document uri.
+        """
+        return DefaultInterpreterInfo("interpreter_id", sys.executable, {}, [])
+
+
+def test_lint_python_action(
+    language_server_initialized: IRobocorpLanguageServerClient,
+    tmpdir,
+    data_regression,
+    disable_rcc_diagnostics,
+):
+    from robocorp_ls_core import uris
+    from robocorp_ls_core.ep_resolve_interpreter import EPResolveInterpreter
+    from robocorp_ls_core.unittest_tools.fixtures import TIMEOUT
+
+    conda_yaml = tmpdir.join("action.py")
+    python_file = """
+from robocorp.actions import action
+
+@action
+def my_action():
+    pass
+    """
+    conda_yaml.write_text(
+        python_file,
+        "utf-8",
+    )
+
+    language_server_client = language_server_initialized
+
+    # Note: so that we don't create a conda.yaml with robocorp.actions installed
+    # in it, we just add a new resolver which adds the current environment
+    # (and added robocorp.actions to the current environment in pyproject.toml).
+    language_server = language_server_client.language_server_instance  # type:ignore
+    pm: PluginManager = language_server.pm
+    pm.register(EPResolveInterpreter, ResolveInterpreterCurrentEnv)
+    conda_yaml_uri = uris.from_fs_path(str(conda_yaml))
+    message_matcher = language_server_client.obtain_pattern_message_matcher(
+        {"method": "textDocument/publishDiagnostics"}
+    )
+    assert message_matcher
+    language_server_client.open_doc(conda_yaml_uri, 1, python_file)
+
+    assert message_matcher.event.wait(TIMEOUT)
+    diag = message_matcher.msg["params"]["diagnostics"]
+    data_regression.check(sort_diagnostics(diag))
+
+
+class LSAutoApiClient:
+    def __init__(self, ls_client) -> None:
+        from robocorp_code_tests.robocode_language_server_client import (
+            RobocorpLanguageServerClient,
+        )
+
+        self.ls_client: RobocorpLanguageServerClient = ls_client
+
+    def underscore_to_camelcase(self, name):
+        words = name.split("_")
+        camelcase_name = words[0] + "".join(word.capitalize() for word in words[1:])
+        return camelcase_name
+
+    def __getattr__(self, attr: str):
+        if attr.startswith("m_"):
+            attr = attr[2:]
+            method_name = self.underscore_to_camelcase(attr)
+
+            def method(**kwargs):
+                ret = self.ls_client.request_sync(method_name, **kwargs)
+                result = {}
+                if ret is not None:
+                    result = ret.get("result", {})
+                if isinstance(result, dict):
+                    # Deal with ActionResultDict.
+                    success = result.get("success")
+                    if success is not None:
+                        assert success
+
+                    return result.get("result", {})
+
+                return result
+
+            return method
+        raise AttributeError(attr)
+
+
+def test_web_inspector_integrated(
+    language_server_initialized, ws_root_path, cases, browser_preinstalled
+) -> None:
+    """
+    This test should be a reference spanning all the APIs that are available
+    for the inspector webview to use.
+    """
+    from robocorp_code_tests.robocode_language_server_client import (
+        RobocorpLanguageServerClient,
+    )
+    from robocorp_ls_core import uris
+
+    cases.copy_to("robots", ws_root_path)
+    ls_client: RobocorpLanguageServerClient = language_server_initialized
+
+    api_client = LSAutoApiClient(ls_client)
+
+    # List robots and load the locators.json.
+    listed_robots = api_client.m_list_robots()
+    assert len(listed_robots) == 2
+
+    name_to_info: Dict[str, LocalRobotMetadataInfoDict] = {}
+    for robot in listed_robots:
+        name_to_info[robot["name"]] = robot
+
+    robot2_directory = name_to_info["robot2"]["directory"]
+    assert api_client.m_manager_load_locators(directory=robot2_directory) == {}
+
+    existing = api_client.m_manager_load_locators(
+        directory=name_to_info["robot1"]["directory"]
+    )
+    assert len(existing) == 3
+
+    # Create a locator from a browser pick on robot 2 (which has no
+    # locators).
+    api_client.m_web_inspector_open_browser(
+        url=uris.from_fs_path(str(Path(robot2_directory) / "page_to_test.html"))
+    )
+
+    api_client.m_web_inspector_start_pick()
+
+    pick_message_matcher = ls_client.obtain_pattern_message_matcher(
+        {"method": "$/webPick"}
+    )
+    api_client.m_web_inspector_click(locator="#div1")
+    pick_message_matcher.event.wait(10)
+    assert pick_message_matcher.msg
+
+    api_client.m_web_inspector_close_browser()
+
+
+def test_web_inspector_integrated_state(
+    language_server_initialized, ws_root_path, cases, browser_preinstalled
+) -> None:
+    from robocorp_code_tests.robocode_language_server_client import (
+        RobocorpLanguageServerClient,
+    )
+
+    cases.copy_to("robots", ws_root_path)
+
+    ls_client: RobocorpLanguageServerClient = language_server_initialized
+
+    api_client = LSAutoApiClient(ls_client)
+
+    pick_message_matcher = ls_client.obtain_pattern_message_matcher(
+        {"method": "$/webInspectorState"}, remove_on_match=False
+    )
+    assert pick_message_matcher
+    pick_message_matcher.on_message = Callback()
+    messages: list = []
+    pick_message_matcher.on_message.register(messages.append)
+
+    api_client.m_web_inspector_start_pick()
+
+    def check_messages(expected_state: str):
+        for msg in messages:
+            if msg["params"].get("state") == expected_state:
+                return True
+        return False
+
+    wait_for_condition(lambda: check_messages(STATE_OPENED))
+    wait_for_condition(lambda: check_messages(STATE_PICKING))
+    del messages[:]
+
+    api_client.m_web_inspector_stop_pick()
+    wait_for_condition(lambda: check_messages(STATE_NOT_PICKING))
+    del messages[:]
+
+    api_client.m_web_inspector_start_pick()
+    wait_for_condition(lambda: check_messages(STATE_PICKING))
+    del messages[:]
+
+    api_client.m_web_inspector_close_browser()
+    wait_for_condition(lambda: check_messages(STATE_CLOSED))
+    del messages[:]
+
+    api_client.m_web_inspector_start_pick()
+    wait_for_condition(lambda: check_messages(STATE_OPENED))
+    wait_for_condition(lambda: check_messages(STATE_PICKING))
+    del messages[:]
+
+    api_client.m_web_inspector_close_browser()
+    wait_for_condition(lambda: check_messages(STATE_CLOSED))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only test.")
+def test_windows_inspector_integrated(
+    language_server_initialized, ws_root_path, cases, tk_process
+) -> None:
+    """
+    This test should be a reference spanning all the APIs that are available
+    for the inspector webview to use.
+    """
+    from robocorp_code_tests.robocode_language_server_client import (
+        RobocorpLanguageServerClient,
+    )
+
+    cases.copy_to("robots", ws_root_path)
+    ls_client: RobocorpLanguageServerClient = language_server_initialized
+
+    api_client = LSAutoApiClient(ls_client)
+
+    result = api_client.m_windows_inspector_parse_locator(locator="")
+    assert not result["success"]
+    assert result["message"]
+
+    result = api_client.m_windows_inspector_parse_locator(locator="foo bar")
+    assert result["success"]
+    assert "No locator strategy found in: 'foo'" in result["message"]
+
+    result = api_client.m_windows_inspector_parse_locator(locator="foo:bar")
+    assert result["success"]
+    assert "No locator strategy found in: 'foo:bar'" in result["message"]
+
+    result = api_client.m_windows_inspector_set_window_locator(
+        locator='name:"name is not there"'
+    )
+    assert not result["success"]
+
+    result = api_client.m_windows_inspector_list_windows()
+    assert result["success"]
+    windows = [x for x in result["result"] if x["name"] == "Tkinter Elements Showcase"]
+    assert len(windows) == 1
+
+    result = api_client.m_windows_inspector_set_window_locator(
+        locator='name:"Tkinter Elements Showcase"'
+    )
+    assert result["success"]
+
+    pick_message_matcher = ls_client.obtain_pattern_message_matcher(
+        {"method": "$/windowsPick"}
+    )
+
+    # When we set the window locator the mouse will be moved to the
+    # window. This means that just starting the picking now will have
+    # the cursor at the proper location.
+    result = api_client.m_windows_inspector_start_pick()
+    assert result["success"]
+    pick_message_matcher.event.wait(10)
+    assert pick_message_matcher.msg
+
+    result = api_client.m_windows_inspector_stop_pick()
+    assert result["success"]
+
+    result = api_client.m_windows_inspector_start_highlight(locator="control:Button")
+    assert result["success"]
+    assert len(result["result"]["matched_paths"]) > 4
+
+    result = api_client.m_windows_inspector_collect_tree(locator="control:Button")
+    assert result["success"]
+    assert len(result["result"]["matched_paths"]) > 4
+
+    result = api_client.m_windows_inspector_stop_highlight()
+    assert result["success"]

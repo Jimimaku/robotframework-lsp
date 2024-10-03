@@ -1,16 +1,20 @@
 import os
+import subprocess
+import sys
+import typing
+from pathlib import Path
+from typing import Any, Iterator
 
 import pytest
-
+from robocorp_code_tests.protocols import IRobocorpLanguageServerClient
 from robocorp_ls_core.protocols import IConfigProvider
 from robocorp_ls_core.robotframework_log import get_logger
 from robocorp_ls_core.unittest_tools.cases_fixture import CasesFixture
-from robocorp_code.protocols import IRcc, ActionResult
-import sys
-from typing import Any
-from pathlib import Path
-from robocorp_code_tests.protocols import IRobocorpLanguageServerClient
 
+from robocorp_code.protocols import ActionResult, IRcc
+
+if typing.TYPE_CHECKING:
+    from robocorp_code.inspector.web._web_inspector import PickedLocatorTypedDict
 
 log = get_logger(__name__)
 
@@ -42,8 +46,7 @@ def main_module():
 
 @pytest.fixture
 def rcc_location() -> str:
-    from robocorp_code.rcc import download_rcc
-    from robocorp_code.rcc import get_default_rcc_location
+    from robocorp_code.rcc import download_rcc, get_default_rcc_location
 
     location = get_default_rcc_location()
     download_rcc(location, force=False)
@@ -85,6 +88,56 @@ def cases(tmpdir_factory) -> CasesFixture:
     return CasesFixture(copy_to, original_resources_dir)
 
 
+@pytest.fixture(
+    scope="session",
+)
+def cached_conda_cloud():
+    from robocorp_code.vendored_deps.package_deps import conda_cloud
+
+    f = __file__
+    original_resources_dir = Path(os.path.join(os.path.dirname(f), "_resources"))
+    assert original_resources_dir.exists()
+    conda_cache = original_resources_dir / "conda-forge cache"
+    conda_indexes = conda_cache / ".conda_indexes"
+
+    # Uncomment to update with the latest conda forge information.
+    # Note: remove existing first to generate with the same index number.
+    # Note: we generate just for the libraries we're interested in to keep
+    # the sqlite db small.
+    #
+    # import shutil
+    # conda_cloud.INDEX_FOR_LIBRARIES = set(["numpy", "mu_repo", "python", "pip"])
+    # if conda_indexes.exists():
+    #     shutil.rmtree(conda_indexes)
+    # conda = conda_cloud.CondaCloud(conda_indexes)
+    # conda.schedule_update(wait=True, force=True)
+
+    assert conda_cache.exists()
+    assert (conda_indexes / "index_0001" / "win-64.db").exists()
+    conda = conda_cloud.CondaCloud(conda_indexes, reindex_if_old=False)
+    assert conda.is_information_cached()
+    return conda
+
+
+@pytest.fixture(scope="session", autouse=True)
+def patch_conda_forge_cloud_setup(cached_conda_cloud):
+    from pytest import MonkeyPatch
+
+    from robocorp_code.robocorp_language_server import RobocorpLanguageServer
+
+    def _create_conda_cloud(self, _cache_dir: str):
+        return cached_conda_cloud
+
+    monkeypatch = MonkeyPatch()
+    monkeypatch.setattr(
+        RobocorpLanguageServer,
+        "_create_conda_cloud",
+        _create_conda_cloud,
+    )
+    yield
+    monkeypatch.undo()
+
+
 @pytest.fixture
 def robocorp_home(tmpdir) -> str:
     # import shutil
@@ -104,8 +157,9 @@ def config_provider(
     rcc_config_location: str,
     robocorp_home: str,
 ):
-    from robocorp_code.robocorp_config import RobocorpConfig
     from robocorp_ls_core.ep_providers import DefaultConfigurationProvider
+
+    from robocorp_code.robocorp_config import RobocorpConfig
 
     config = RobocorpConfig()
 
@@ -198,10 +252,11 @@ class RccPatch(object):
         return self._current_mock(args, *starargs, **kwargs)
 
     def mock_run_rcc_default(self, args, *sargs, **kwargs) -> ActionResult:
-        import json
         import copy
-        from robocorp_code.rcc import ACCOUNT_NAME
+        import json
         import shutil
+
+        from robocorp_code.rcc import ACCOUNT_NAME
 
         if self.custom_handler is not None:
             ret = self.custom_handler(args, *sargs, **kwargs)
@@ -267,7 +322,7 @@ class RccPatch(object):
             conda_prefix = Path(self.tmpdir.join(f"conda_prefix_{space_name}"))
             conda_prefix.mkdir()
 
-            conda_yaml = args[-2]
+            conda_yaml = args[-4]
             assert conda_yaml.endswith("conda.yaml")
             shutil.copyfile(conda_yaml, conda_prefix / "identity.yaml")
 
@@ -352,3 +407,128 @@ def language_server_initialized(
         raise AssertionError(f"Unexpected result: {result}")
 
     return language_server
+
+
+@pytest.fixture
+def patch_pypi_cloud(monkeypatch):
+    import datetime
+
+    from robocorp_code_tests.deps.cloud_mock_data import (
+        JQ_PYPI_MOCK_DATA,
+        RPAFRAMEWORK_PYPI_MOCK_DATA,
+    )
+
+    from robocorp_code import hover
+    from robocorp_code.vendored_deps.package_deps.pypi_cloud import PyPiCloud
+
+    def _get_json_from_cloud(self, url):
+        if url == "https://pypi.org/pypi/rpaframework/json":
+            return RPAFRAMEWORK_PYPI_MOCK_DATA
+        elif url == "https://pypi.org/pypi/jq/json":
+            return JQ_PYPI_MOCK_DATA
+        else:
+            raise AssertionError(f"Unexpected: {url}")
+
+    monkeypatch.setattr(
+        PyPiCloud,
+        "_get_json_from_cloud",
+        _get_json_from_cloud,
+    )
+    monkeypatch.setattr(
+        hover,
+        "FORCE_DATETIME_NOW",
+        datetime.datetime(2023, 8, 10),
+    )
+
+
+@pytest.fixture
+def patch_pypi_cloud_no_releases_12_months(monkeypatch):
+    import datetime
+
+    from robocorp_code_tests.deps.cloud_mock_data import RPAFRAMEWORK_PYPI_MOCK_DATA
+
+    from robocorp_code import hover
+    from robocorp_code.vendored_deps.package_deps.pypi_cloud import PyPiCloud
+
+    def _get_json_from_cloud(self, url):
+        if url == "https://pypi.org/pypi/rpaframework/json":
+            return RPAFRAMEWORK_PYPI_MOCK_DATA
+        else:
+            raise AssertionError(f"Unexpected: {url}")
+
+    monkeypatch.setattr(
+        PyPiCloud,
+        "_get_json_from_cloud",
+        _get_json_from_cloud,
+    )
+    monkeypatch.setattr(
+        hover,
+        "FORCE_DATETIME_NOW",
+        datetime.datetime(2025, 8, 10),
+    )
+
+
+def fix_locator(locator: "PickedLocatorTypedDict") -> "PickedLocatorTypedDict":
+    """
+    Utility to convert a locator into a format that's suitable to be
+    written to disk and compared an other runs.
+    """
+    import os.path
+
+    locator["source"] = os.path.basename(locator["source"]).replace(
+        "page_to_test2.html", "page_to_test.html"
+    )
+    locator["screenshot"] = locator["screenshot"][:24] + " ... <clipped>"
+    element = locator["element"]
+    modifier = element.get("modifier")
+    if modifier and modifier.startswith("file://"):
+        modifier = modifier[:7]
+        element["modifier"] = modifier
+    frame = locator.get("frame")
+    if frame:
+        frame["url"] = frame["url"][:7] + " ... <clipped>"
+        frame["sourceURL"] = frame["sourceURL"][:7] + " ... <clipped>"
+
+    return locator
+
+
+@pytest.fixture(scope="session")
+def browser_preinstalled():
+    from robocorp_code.playwright import robocorp_browser
+
+    # Make sure that the engine is installed before we start (as the tests are
+    # async, it's possible that things would take longer if it's not installed
+    # which'd make the test failed due to the timeout).
+    assert robocorp_browser.page() is not None
+    robocorp_browser.page().close()
+
+
+@pytest.fixture
+def tk_process(datadir) -> Iterator[subprocess.Popen]:
+    """
+    Note: kills existing tk processes prior to starting.
+    """
+    from robocorp_ls_core.basic import kill_process_and_subprocesses
+
+    from robocorp_code.inspector.windows.robocorp_windows import (
+        find_window,
+        find_windows,
+    )
+
+    # Ensure no tk processes when we start...
+    windows_found = list(
+        x for x in find_windows() if x.name == "Tkinter Elements Showcase"
+    )
+    for w in windows_found:
+        kill_process_and_subprocesses(w.ui_automation_control.ProcessId)
+
+    f = Path(__file__).absolute().parent / "snippet_tk.py"
+    assert f.exists()
+    popen = subprocess.Popen([sys.executable, str(f)])
+
+    # i.e.: wait for it to be visible
+    find_window('name:"Tkinter Elements Showcase"', timeout=20)
+
+    yield popen
+    if popen.poll() is None:
+        kill_process_and_subprocesses(popen.pid)

@@ -21,18 +21,18 @@ jobs:
       fail-fast: false
       matrix:
         name: [
-          "windows-py37-pip-v3",
-          "ubuntu-py38-master",
+          "windows-py39-pip-v3",
+#           "ubuntu-py38-master", TODO: Reenable when RF fixes https://github.com/robotframework/robotframework/issues/4607
           "ubuntu-py38-pip-v4",
         ]
         
         include:
-          - name: "windows-py37-pip-v3"
-            python: "3.7"
+          - name: "windows-py39-pip-v3"
+            python: "3.9"
             os: windows-latest
-          - name: "ubuntu-py38-master"
-            python: "3.8"
-            os: ubuntu-latest
+#           - name: "ubuntu-py38-master" TODO: Reenable when RF fixes https://github.com/robotframework/robotframework/issues/4607
+#             python: "3.8"
+#             os: ubuntu-latest
           - name: "ubuntu-py38-pip-v4"
             python: "3.8"
             os: ubuntu-latest
@@ -44,7 +44,7 @@ jobs:
       with:
         submodules: recursive
     - name: Set up Python ${{ matrix.python }}
-      uses: actions/setup-python@v1
+      uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python }}
     - name: Upgrade pip
@@ -56,7 +56,7 @@ jobs:
       run: python -W ignore -m pip install "robotframework>=3.2,<4.0"
       if: contains(matrix.name, '-pip-v3')
     - name: Install robotframework from pip
-      run: python -W ignore -m pip install "robotframework>=4.0"
+      run: python -W ignore -m pip install "robotframework>=4.0,<5.0"
       if: contains(matrix.name, '-pip-v4')
     - name: setup.py install (robocorp-pytho-ls-core)
       working-directory: ./robocorp-python-ls-core
@@ -82,7 +82,7 @@ jobs:
         PYTHONPATH: .
         RUN_TESTS_TIMEOUT: 300
       run: python -u ../../robocorp-python-ls-core/tests/run_tests.py -rfE -otests_output -vv .
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: tests_output.${{ matrix.name }}.txt
         path: robotframework-interactive/tests/tests_output
